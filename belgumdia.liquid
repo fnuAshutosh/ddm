@@ -1,0 +1,455 @@
+{% comment %}
+  sections/belgumdia.liquid
+  Belgumdia Diamond / Watch / Jewellery Inventory
+  Fetches data from Vercel proxy — API key never exposed to browser.
+{% endcomment %}
+
+<div id="belgumdia-app" class="belgumdia-section page-width">
+
+  {%- comment -%} ── Tabs ── {%- endcomment -%}
+  <div class="belgumdia-tabs" role="tablist">
+    <button class="belgumdia-tab active" data-type="natural"  role="tab" aria-selected="true">Natural Diamonds</button>
+    <button class="belgumdia-tab"        data-type="lab"      role="tab">Lab Diamonds</button>
+    <button class="belgumdia-tab"        data-type="watch"    role="tab">Watches</button>
+    <button class="belgumdia-tab"        data-type="jewelry"  role="tab">Jewellery</button>
+  </div>
+
+  {%- comment -%} ── Filters ── {%- endcomment -%}
+  <div class="belgumdia-filters">
+    <input
+      type="search"
+      id="belgumdia-search"
+      placeholder="Search by shape, cut, colour…"
+      autocomplete="off"
+    />
+    <select id="belgumdia-sort">
+      <option value="">Sort by</option>
+      <option value="price_asc">Price: Low → High</option>
+      <option value="price_desc">Price: High → Low</option>
+      <option value="carat_asc">Carat: Low → High</option>
+      <option value="carat_desc">Carat: High → Low</option>
+    </select>
+    <span id="belgumdia-count" class="belgumdia-count"></span>
+  </div>
+
+  {%- comment -%} ── Results grid ── {%- endcomment -%}
+  <div id="belgumdia-grid" class="belgumdia-grid" aria-live="polite" aria-busy="true">
+    <div class="belgumdia-loading">
+      <span class="belgumdia-spinner"></span>
+      Loading inventory…
+    </div>
+  </div>
+
+  {%- comment -%} ── Pagination ── {%- endcomment -%}
+  <div id="belgumdia-pagination" class="belgumdia-pagination"></div>
+
+</div>
+
+<style>
+.belgumdia-section { padding: 2rem 0; }
+
+/* Tabs */
+.belgumdia-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 2px solid #e5e5e5;
+  margin-bottom: 1.5rem;
+  flex-wrap: wrap;
+}
+.belgumdia-tab {
+  padding: 0.75rem 1.5rem;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 0.95rem;
+  color: #666;
+  border-bottom: 3px solid transparent;
+  margin-bottom: -2px;
+  transition: color 0.2s, border-color 0.2s;
+}
+.belgumdia-tab:hover { color: #111; }
+.belgumdia-tab.active {
+  color: #111;
+  border-bottom-color: #111;
+  font-weight: 600;
+}
+
+/* Filters */
+.belgumdia-filters {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+#belgumdia-search {
+  flex: 1;
+  min-width: 200px;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 0.9rem;
+}
+#belgumdia-sort {
+  padding: 0.5rem 0.75rem;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 0.9rem;
+  background: #fff;
+}
+.belgumdia-count {
+  font-size: 0.85rem;
+  color: #888;
+  white-space: nowrap;
+}
+
+/* Grid */
+.belgumdia-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 1.25rem;
+  min-height: 200px;
+}
+
+/* Card */
+.belgumdia-card {
+  border: 1px solid #e5e5e5;
+  border-radius: 8px;
+  padding: 1rem;
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  transition: box-shadow 0.2s;
+}
+.belgumdia-card:hover { box-shadow: 0 4px 16px rgba(0,0,0,0.08); }
+.belgumdia-card-title {
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: #111;
+}
+.belgumdia-card-price {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #111;
+}
+.belgumdia-card-meta {
+  font-size: 0.82rem;
+  color: #777;
+  line-height: 1.5;
+}
+.belgumdia-card-badge {
+  display: inline-block;
+  padding: 0.2rem 0.5rem;
+  border-radius: 3px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  background: #f4f4f4;
+  color: #555;
+  margin-top: auto;
+}
+
+/* Loading */
+.belgumdia-loading {
+  grid-column: 1 / -1;
+  text-align: center;
+  padding: 3rem;
+  color: #888;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+}
+.belgumdia-spinner {
+  width: 20px; height: 20px;
+  border: 2px solid #ddd;
+  border-top-color: #111;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  display: inline-block;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.belgumdia-error {
+  grid-column: 1 / -1;
+  text-align: center;
+  padding: 2rem;
+  color: #c0392b;
+}
+
+/* Pagination */
+.belgumdia-pagination {
+  display: flex;
+  justify-content: center;
+  gap: 0.5rem;
+  margin-top: 2rem;
+  flex-wrap: wrap;
+}
+.belgumdia-page-btn {
+  padding: 0.4rem 0.8rem;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  background: #fff;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: background 0.2s, border-color 0.2s;
+}
+.belgumdia-page-btn:hover { background: #f4f4f4; }
+.belgumdia-page-btn.active {
+  background: #111;
+  color: #fff;
+  border-color: #111;
+}
+.belgumdia-page-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+</style>
+
+<script>
+(function () {
+  // ─── CONFIG ───────────────────────────────────────────────────
+  const PROXY_BASE = "{{ section.settings.proxy_url | default: 'https://YOUR-PROJECT.vercel.app' }}";
+  const PAGE_SIZE  = {{ section.settings.page_size | default: 48 }};
+  // ─────────────────────────────────────────────────────────────
+
+  let state = {
+    type:    "natural",
+    page:    1,
+    search:  "",
+    sort:    "",
+    total:   0,
+    loading: false,
+  };
+
+  // Debounce helper
+  function debounce(fn, delay) {
+    let t;
+    return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), delay); };
+  }
+
+  // Build URL
+  function buildUrl() {
+    const params = new URLSearchParams({
+      type:  state.type,
+      page:  state.page,
+      limit: PAGE_SIZE,
+    });
+    if (state.search) params.set("search", state.search);
+    if (state.sort)   params.set("sort",   state.sort);
+    return `${PROXY_BASE}/api/proxy?${params}`;
+  }
+
+  // Render a single card
+  function renderCard(item, type) {
+    const el = document.createElement("div");
+    el.className = "belgumdia-card";
+
+    if (type === "natural" || type === "lab") {
+      const shape  = item.shape  || item.Shape  || "";
+      const carat  = item.carat  || item.Carat  || "";
+      const color  = item.color  || item.Color  || "";
+      const clarity= item.clarity|| item.Clarity|| "";
+      const cut    = item.cut    || item.Cut    || "";
+      const price  = item.price  || item.Price  || item.total_price || "";
+      const cert   = item.lab    || item.Lab    || item.certificate || "";
+
+      el.innerHTML = `
+        <div class="belgumdia-card-title">${carat}ct ${shape}</div>
+        <div class="belgumdia-card-price">${price ? "$" + Number(price).toLocaleString() : "POA"}</div>
+        <div class="belgumdia-card-meta">
+          Colour: ${color} &nbsp;|&nbsp; Clarity: ${clarity}<br>
+          Cut: ${cut}${cert ? `<br>Cert: ${cert}` : ""}
+        </div>
+        <span class="belgumdia-card-badge">${type === "lab" ? "Lab Grown" : "Natural"}</span>
+      `;
+    } else if (type === "watch") {
+      const brand = item.brand || item.Brand || item.make || "";
+      const model = item.model || item.Model || item.name || "";
+      const price = item.price || item.Price || "";
+      const ref   = item.reference || item.ref || item.sku || "";
+
+      el.innerHTML = `
+        <div class="belgumdia-card-title">${brand} ${model}</div>
+        <div class="belgumdia-card-price">${price ? "$" + Number(price).toLocaleString() : "POA"}</div>
+        <div class="belgumdia-card-meta">${ref ? "Ref: " + ref : ""}</div>
+        <span class="belgumdia-card-badge">Watch</span>
+      `;
+    } else {
+      const name  = item.name  || item.Name  || item.title || "";
+      const price = item.price || item.Price || "";
+      const metal = item.metal || item.Metal || item.material || "";
+
+      el.innerHTML = `
+        <div class="belgumdia-card-title">${name}</div>
+        <div class="belgumdia-card-price">${price ? "$" + Number(price).toLocaleString() : "POA"}</div>
+        <div class="belgumdia-card-meta">${metal}</div>
+        <span class="belgumdia-card-badge">Jewellery</span>
+      `;
+    }
+
+    return el;
+  }
+
+  // Render pagination
+  function renderPagination(totalPages) {
+    const el = document.getElementById("belgumdia-pagination");
+    el.innerHTML = "";
+
+    if (totalPages <= 1) return;
+
+    const maxVisible = 7;
+    let pages = [];
+
+    if (totalPages <= maxVisible) {
+      pages = Array.from({ length: totalPages }, (_, i) => i + 1);
+    } else {
+      pages = [1];
+      if (state.page > 3) pages.push("…");
+      for (let p = Math.max(2, state.page - 1); p <= Math.min(totalPages - 1, state.page + 1); p++) {
+        pages.push(p);
+      }
+      if (state.page < totalPages - 2) pages.push("…");
+      pages.push(totalPages);
+    }
+
+    // Prev
+    const prev = document.createElement("button");
+    prev.className = "belgumdia-page-btn";
+    prev.textContent = "← Prev";
+    prev.disabled = state.page === 1;
+    prev.addEventListener("click", () => loadPage(state.page - 1));
+    el.appendChild(prev);
+
+    // Page numbers
+    pages.forEach((p) => {
+      const btn = document.createElement("button");
+      btn.className = "belgumdia-page-btn" + (p === state.page ? " active" : "");
+      btn.textContent = p;
+      if (p === "…") { btn.disabled = true; btn.style.border = "none"; }
+      else btn.addEventListener("click", () => loadPage(p));
+      el.appendChild(btn);
+    });
+
+    // Next
+    const next = document.createElement("button");
+    next.className = "belgumdia-page-btn";
+    next.textContent = "Next →";
+    next.disabled = state.page === totalPages;
+    next.addEventListener("click", () => loadPage(state.page + 1));
+    el.appendChild(next);
+  }
+
+  // Main fetch + render
+  async function load() {
+    if (state.loading) return;
+    state.loading = true;
+
+    const grid = document.getElementById("belgumdia-grid");
+    const count = document.getElementById("belgumdia-count");
+
+    grid.setAttribute("aria-busy", "true");
+    grid.innerHTML = '<div class="belgumdia-loading"><span class="belgumdia-spinner"></span> Loading…</div>';
+
+    try {
+      const res  = await fetch(buildUrl());
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+
+      state.total = data.total_items;
+      grid.innerHTML = "";
+
+      if (!data.items || data.items.length === 0) {
+        grid.innerHTML = '<div class="belgumdia-loading">No items found.</div>';
+      } else {
+        data.items.forEach((item) => grid.appendChild(renderCard(item, state.type)));
+      }
+
+      count.textContent = `${data.total_items.toLocaleString()} items`;
+      renderPagination(data.total_pages);
+
+    } catch (err) {
+      grid.innerHTML = `<div class="belgumdia-error">Failed to load inventory. Please try again.<br><small>${err.message}</small></div>`;
+      console.error("[belgumdia]", err);
+    } finally {
+      state.loading = false;
+      grid.setAttribute("aria-busy", "false");
+    }
+  }
+
+  function loadPage(p) {
+    state.page = p;
+    window.scrollTo({ top: document.getElementById("belgumdia-app").offsetTop - 20, behavior: "smooth" });
+    load();
+  }
+
+  // ─── Event listeners ──────────────────────────────────────────
+  document.querySelectorAll(".belgumdia-tab").forEach((tab) => {
+    tab.addEventListener("click", () => {
+      document.querySelectorAll(".belgumdia-tab").forEach((t) => {
+        t.classList.remove("active");
+        t.setAttribute("aria-selected", "false");
+      });
+      tab.classList.add("active");
+      tab.setAttribute("aria-selected", "true");
+
+      state.type   = tab.dataset.type;
+      state.page   = 1;
+      state.search = "";
+      state.sort   = "";
+
+      document.getElementById("belgumdia-search").value = "";
+      document.getElementById("belgumdia-sort").value   = "";
+
+      load();
+    });
+  });
+
+  document.getElementById("belgumdia-search").addEventListener(
+    "input",
+    debounce((e) => {
+      state.search = e.target.value.trim();
+      state.page   = 1;
+      load();
+    }, 400)
+  );
+
+  document.getElementById("belgumdia-sort").addEventListener("change", (e) => {
+    state.sort = e.target.value;
+    state.page = 1;
+    load();
+  });
+
+  // Initial load
+  load();
+})();
+</script>
+
+{% schema %}
+{
+  "name": "Belgumdia Inventory",
+  "settings": [
+    {
+      "type": "text",
+      "id": "proxy_url",
+      "label": "Vercel Proxy URL",
+      "info": "Your Vercel deployment URL, e.g. https://belgumdia-proxy.vercel.app",
+      "placeholder": "https://your-project.vercel.app"
+    },
+    {
+      "type": "range",
+      "id": "page_size",
+      "label": "Items per page",
+      "min": 12,
+      "max": 100,
+      "step": 12,
+      "default": 48
+    }
+  ],
+  "presets": [
+    {
+      "name": "Belgumdia Inventory"
+    }
+  ]
+}
+{% endschema %}
