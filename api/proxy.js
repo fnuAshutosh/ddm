@@ -107,17 +107,26 @@ function corsHeaders(origin) {
   };
 }
 
-export default async function handler(req, res) {
+function setHeaders(res, headers) {
+  Object.entries(headers).forEach(([key, value]) => {
+    res.setHeader(key, value);
+  });
+}
+
+module.exports = async function handler(req, res) {
   const origin = req.headers.origin || "";
   const headers = corsHeaders(origin);
 
   // Handle CORS preflight
   if (req.method === "OPTIONS") {
-    return res.status(204).set(headers).end();
+    setHeaders(res, headers);
+    return res.writeHead(204).end();
   }
 
   if (req.method !== "GET") {
-    return res.status(405).json({ error: "Method not allowed" });
+    setHeaders(res, headers);
+    res.writeHead(405);
+    return res.end(JSON.stringify({ error: "Method not allowed" }));
   }
 
   const { type, page, limit, search, sort } = req.query;
@@ -125,9 +134,11 @@ export default async function handler(req, res) {
   // Validate type
   const validTypes = ["natural", "lab", "watch", "jewelry"];
   if (!type || !validTypes.includes(type)) {
-    return res.status(400).set(headers).json({
+    setHeaders(res, headers);
+    res.writeHead(400);
+    return res.end(JSON.stringify({
       error: `type must be one of: ${validTypes.join(", ")}`,
-    });
+    }));
   }
 
   const pageNum  = Math.max(1, parseInt(page, 10) || 1);
@@ -145,15 +156,16 @@ export default async function handler(req, res) {
     const start = (pageNum - 1) * pageSize;
     const slice = filtered.slice(start, start + pageSize);
 
-    res.set({
+    const responseHeaders = {
       ...headers,
       "Content-Type": "application/json",
       "Cache-Control": "public, s-maxage=900, stale-while-revalidate=60",
       "X-Cache": fromCache ? "HIT" : "MISS",
       "X-Fetched-At": new Date(fetchedAt).toISOString(),
-    });
+    };
+    setHeaders(res, responseHeaders);
 
-    return res.status(200).json({
+    const responseBody = {
       type,
       page: pageNum,
       limit: pageSize,
@@ -162,13 +174,18 @@ export default async function handler(req, res) {
       fetched_at: new Date(fetchedAt).toISOString(),
       cache_hit: fromCache,
       items: slice,
-    });
+    };
+
+    res.writeHead(200);
+    return res.end(JSON.stringify(responseBody));
 
   } catch (err) {
     console.error("[belgumdia-proxy] error:", err.message);
-    return res.status(502).set(headers).json({
+    setHeaders(res, headers);
+    res.writeHead(502);
+    return res.end(JSON.stringify({
       error: "Failed to fetch from supplier",
       detail: err.message,
-    });
+    }));
   }
-}
+};
