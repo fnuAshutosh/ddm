@@ -19,52 +19,80 @@ const CACHE_TTL_MS = 15 * 60 * 1000; // 15 minutes
 // In-memory cache (persists across warm invocations on same instance)
 const cache = {};
 
-function buildSupplierUrl(type) {
+function buildSupplierUrl(type, page = 1) {
   const key = process.env.BELGUMDIA_API_KEY;
   if (!key) throw new Error("BELGUMDIA_API_KEY env var not set");
 
   const base = "https://belgiumdia.com/api/developer-api";
 
-  if (type === "natural") return `${base}/diamond?type=natural&key=${key}`;
-  if (type === "lab")     return `${base}/diamond?type=lab&key=${key}`;
-  if (type === "watch")   return `${base}/watch?key=${key}`;
-  if (type === "jewelry") return `${base}/jewelry?key=${key}`;
+  if (type === "natural") return `${base}/diamond?type=natural&page=${page}&key=${key}`;
+  if (type === "lab")     return `${base}/diamond?type=lab&page=${page}&key=${key}`;
+  if (type === "watch")   return `${base}/watch?page=${page}&key=${key}`;
+  if (type === "jewelry") return `${base}/jewelry?page=${page}&key=${key}`;
 
   throw new Error(`Unknown type: ${type}`);
 }
 
-async function fetchWithCache(type) {
+async function fetchWithCache(type, page = 1) {
   const now = Date.now();
-  const cached = cache[type];
+  const cacheKey = `${type}_page${page}`;
+  const cached = cache[cacheKey];
 
   if (cached && now - cached.fetchedAt < CACHE_TTL_MS) {
+    console.log(`[belgumdia-proxy] Cache HIT for ${cacheKey}`);
     return { items: cached.items, fromCache: true, fetchedAt: cached.fetchedAt };
   }
 
-  const url = buildSupplierUrl(type);
-  const res = await fetch(url, { headers: { Accept: "application/json" } });
+  const url = buildSupplierUrl(type, page);
+  console.log(`[belgumdia-proxy] Fetching from: ${url.replace(/key=.+/, 'key=***')}`);
+  
+  try {
+    // Fetch with 30 second timeout
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000);
+    
+    const res = await fetch(url, { 
+      headers: { Accept: "application/json" },
+      signal: controller.signal
+    });
+    clearTimeout(timeoutId);
 
-  if (!res.ok) {
-    throw new Error(`Supplier API returned ${res.status} for type=${type}`);
+    if (!res.ok) {
+      const errorText = await res.text();
+      console.error(`[belgumdia-proxy] API error ${res.status}: ${errorText.substring(0, 200)}`);
+      throw new Error(`Supplier API returned ${res.status}`);
+    }
+
+    const json = await res.json();
+    console.log(`[belgumdia-proxy] API response keys:`, Object.keys(json));
+    
+    // Handle error message from API (rate limit, etc)
+    if (json.message && json.message !== "Success") {
+      console.warn(`[belgumdia-proxy] API message: ${json.message}`);
+    }
+
+    // Response structure: {data: [], message: "Success"}
+    let items = [];
+    if (Array.isArray(json))              items = json;
+    else if (Array.isArray(json.data))    items = json.data;
+    else if (Array.isArray(json.diamond)) items = json.diamond;
+    else if (Array.isArray(json.watch))   items = json.watch;
+    else if (Array.isArray(json.jewelry)) items = json.jewelry;
+    else {
+      const firstArray = Object.values(json).find(Array.isArray);
+      items = firstArray || [];
+    }
+
+    console.log(`[belgumdia-proxy] Found ${items.length} items for ${type}`);
+    cache[cacheKey] = { items, fetchedAt: now };
+    return { items, fromCache: false, fetchedAt: now };
+    
+  } catch (err) {
+    console.error(`[belgumdia-proxy] Fetch error for ${type}:`, err.message);
+    // Return cached empty result on error
+    cache[cacheKey] = { items: [], fetchedAt: now };
+    return { items: [], fromCache: false, fetchedAt: now };
   }
-
-  const json = await res.json();
-
-  // Normalise: supplier wraps data in different keys per endpoint
-  let items = [];
-  if (Array.isArray(json))              items = json;
-  else if (Array.isArray(json.data))    items = json.data;
-  else if (Array.isArray(json.diamond)) items = json.diamond;
-  else if (Array.isArray(json.watch))   items = json.watch;
-  else if (Array.isArray(json.jewelry)) items = json.jewelry;
-  else {
-    // Last resort: find the first array value in the response object
-    const firstArray = Object.values(json).find(Array.isArray);
-    items = firstArray || [];
-  }
-
-  cache[type] = { items, fetchedAt: now };
-  return { items, fromCache: false, fetchedAt: now };
 }
 
 function applySearch(items, search) {
@@ -145,7 +173,7 @@ module.exports = async function handler(req, res) {
   const pageSize = Math.min(PAGE_SIZE_MAX, Math.max(1, parseInt(limit, 10) || PAGE_SIZE_DEFAULT));
 
   try {
-    const { items, fromCache, fetchedAt } = await fetchWithCache(type);
+    const { items, fromCache, fetchedAt } = await fetchWithCache(type, pageNum);
 
     // Apply search + sort
     const filtered = applySort(applySearch(items, search), sort);
