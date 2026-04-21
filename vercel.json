@@ -17,7 +17,7 @@
   "crons": [
     {
       "path": "/api/sync-belgiumdia.js",
-      "schedule": "0 */6 * * *"
+      "schedule": "0 0 * * *"
     }
   ],
   "headers": [
