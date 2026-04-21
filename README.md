@@ -158,3 +158,4 @@ belgumdia-proxy/
 │       └── belgumdia.liquid  ← Shopify theme section (copy to your theme)
 └── README.md
 ```
+# belgiumdia-shopify-proxy
