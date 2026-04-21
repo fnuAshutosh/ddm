@@ -33,12 +33,12 @@ function buildSupplierUrl(type, page = 1) {
   throw new Error(`Unknown type: ${type}`);
 }
 
-async function fetchWithCache(type, page = 1) {
+async function fetchWithCache(type, page = 1, skipCache = false) {
   const now = Date.now();
   const cacheKey = `${type}_page${page}`;
   const cached = cache[cacheKey];
 
-  if (cached && now - cached.fetchedAt < CACHE_TTL_MS) {
+  if (cached && now - cached.fetchedAt < CACHE_TTL_MS && !skipCache) {
     console.log(`[belgumdia-proxy] Cache HIT for ${cacheKey}`);
     return { items: cached.items, fromCache: true, fetchedAt: cached.fetchedAt };
   }
@@ -159,6 +159,9 @@ module.exports = async function handler(req, res) {
 
   const { type, page, limit, search, sort } = req.query;
 
+  // Add skipCache if ?nocache=true is passed
+  const skipCache = req.query.nocache === 'true';
+
   // Validate type
   const validTypes = ["natural", "lab", "watch", "jewelry"];
   if (!type || !validTypes.includes(type)) {
@@ -173,7 +176,7 @@ module.exports = async function handler(req, res) {
   const pageSize = Math.min(PAGE_SIZE_MAX, Math.max(1, parseInt(limit, 10) || PAGE_SIZE_DEFAULT));
 
   try {
-    const { items, fromCache, fetchedAt } = await fetchWithCache(type, pageNum);
+    const { items, fromCache, fetchedAt } = await fetchWithCache(type, pageNum, skipCache);
 
     // Apply search + sort
     const filtered = applySort(applySearch(items, search), sort);
