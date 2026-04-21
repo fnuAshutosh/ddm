@@ -8,12 +8,6 @@
       "maxDuration": 300
     }
   },
-  "env": {
-    "SHOPIFY_CLIENT_ID": "@shopify-client-id",
-    "SHOPIFY_CLIENT_SECRET": "@shopify-client-secret",
-    "SHOPIFY_STORE_DOMAIN": "@shopify-store-domain",
-    "BELGUMDIA_API_KEY": "@belgumdia-api-key"
-  },
   "crons": [
     {
       "path": "/api/sync-belgiumdia.js",
