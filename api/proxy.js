@@ -15,9 +15,102 @@ const ALLOWED_ORIGIN = "https://saatchiandco.com";
 const PAGE_SIZE_DEFAULT = 50;
 const PAGE_SIZE_MAX = 100;
 const CACHE_TTL_MS = 15 * 60 * 1000; // 15 minutes
+const WARM_GUARD_MAX_PAGES = 300;
+const VALID_TYPES = ["natural", "lab", "watch", "jewelry"];
 
 // In-memory cache (persists across warm invocations on same instance)
 const cache = {};
+
+function parseCacheKey(cacheKey) {
+  const match = cacheKey.match(/^(natural|lab|watch|jewelry)_page(\d+)$/);
+  if (!match) return null;
+  return { type: match[1], page: Number(match[2]) };
+}
+
+function getCacheSummary() {
+  const now = Date.now();
+  const entries = Object.entries(cache)
+    .map(([key, value]) => {
+      const parsed = parseCacheKey(key);
+      if (!parsed) return null;
+
+      return {
+        key,
+        type: parsed.type,
+        page: parsed.page,
+        item_count: Array.isArray(value.items) ? value.items.length : 0,
+        fetched_at: new Date(value.fetchedAt).toISOString(),
+        age_seconds: Math.floor((now - value.fetchedAt) / 1000),
+        fresh: now - value.fetchedAt < CACHE_TTL_MS,
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => {
+      if (a.type !== b.type) return a.type.localeCompare(b.type);
+      return a.page - b.page;
+    });
+
+  const grouped = VALID_TYPES.reduce((acc, type) => {
+    const typeEntries = entries.filter((entry) => entry.type === type);
+    acc[type] = {
+      pages: typeEntries.length,
+      items: typeEntries.reduce((sum, entry) => sum + entry.item_count, 0),
+    };
+    return acc;
+  }, {});
+
+  return { entries, grouped };
+}
+
+async function warmCache({ types, mode, skipCache }) {
+  const normalizedTypes = (types || VALID_TYPES).filter((type) => VALID_TYPES.includes(type));
+  const warmAllPages = mode === "all";
+  const summary = {
+    warmed_types: normalizedTypes,
+    warmed_pages: 0,
+    warmed_items: 0,
+    stopped_early: false,
+    type_results: {},
+  };
+
+  for (const type of normalizedTypes) {
+    let page = 1;
+    let pageCount = 0;
+    let itemCount = 0;
+    let error = null;
+
+    while (page <= WARM_GUARD_MAX_PAGES) {
+      try {
+        const { items } = await fetchWithCache(type, page, skipCache);
+        pageCount += 1;
+        summary.warmed_pages += 1;
+        itemCount += items.length;
+        summary.warmed_items += items.length;
+
+        if (!warmAllPages || items.length === 0) {
+          break;
+        }
+
+        page += 1;
+      } catch (err) {
+        error = err.message;
+        break;
+      }
+    }
+
+    if (page > WARM_GUARD_MAX_PAGES) {
+      summary.stopped_early = true;
+    }
+
+    summary.type_results[type] = {
+      pages_warmed: pageCount,
+      items_warmed: itemCount,
+      error,
+    };
+  }
+
+  return summary;
+}
 
 function parseSupplierItems(json) {
   if (Array.isArray(json)) return json;
@@ -171,18 +264,76 @@ module.exports = async function handler(req, res) {
     return res.end(JSON.stringify({ error: "Method not allowed" }));
   }
 
-  const { type, page, limit, search, sort } = req.query;
+  const { action, type, page, limit, search, sort } = req.query;
+
+  if (action === "cache") {
+    const { entries, grouped } = getCacheSummary();
+    const key = typeof req.query.key === "string" ? req.query.key : "";
+    const includeItems = req.query.includeItems === "true";
+    const itemsLimit = Math.max(1, Math.min(500, parseInt(req.query.itemsLimit, 10) || 100));
+
+    const response = {
+      entries,
+      grouped,
+      total_entries: entries.length,
+      ttl_seconds: Math.floor(CACHE_TTL_MS / 1000),
+    };
+
+    if (includeItems && key) {
+      const selected = cache[key];
+      if (!selected) {
+        setHeaders(res, { ...headers, "Content-Type": "application/json" });
+        res.writeHead(404);
+        return res.end(JSON.stringify({ error: `cache key not found: ${key}`, ...response }));
+      }
+
+      response.selected = {
+        key,
+        item_count: Array.isArray(selected.items) ? selected.items.length : 0,
+        fetched_at: new Date(selected.fetchedAt).toISOString(),
+        items: (selected.items || []).slice(0, itemsLimit),
+      };
+    }
+
+    setHeaders(res, { ...headers, "Content-Type": "application/json" });
+    res.writeHead(200);
+    return res.end(JSON.stringify(response));
+  }
+
+  if (action === "warm") {
+    const mode = req.query.mode === "all" ? "all" : "first-page";
+    const skipCache = req.query.nocache === "true";
+    const types = typeof req.query.types === "string"
+      ? req.query.types.split(",").map((s) => s.trim()).filter(Boolean)
+      : VALID_TYPES;
+
+    try {
+      const warmResult = await warmCache({ types, mode, skipCache });
+      const snapshot = getCacheSummary();
+      setHeaders(res, { ...headers, "Content-Type": "application/json" });
+      res.writeHead(200);
+      return res.end(JSON.stringify({
+        action: "warm",
+        mode,
+        ...warmResult,
+        cache_after: snapshot,
+      }));
+    } catch (err) {
+      setHeaders(res, { ...headers, "Content-Type": "application/json" });
+      res.writeHead(500);
+      return res.end(JSON.stringify({ error: "cache warm failed", detail: err.message }));
+    }
+  }
 
   // Add skipCache if ?nocache=true is passed
   const skipCache = req.query.nocache === 'true';
 
   // Validate type
-  const validTypes = ["natural", "lab", "watch", "jewelry"];
-  if (!type || !validTypes.includes(type)) {
+  if (!type || !VALID_TYPES.includes(type)) {
     setHeaders(res, headers);
     res.writeHead(400);
     return res.end(JSON.stringify({
-      error: `type must be one of: ${validTypes.join(", ")}`,
+      error: `type must be one of: ${VALID_TYPES.join(", ")}`,
     }));
   }
 

@@ -1,0 +1,308 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DDM Cache Dashboard</title>
+  <style>
+    :root {
+      --bg: #f5f1e8;
+      --panel: #fffdf7;
+      --ink: #1f1d1a;
+      --muted: #6a645b;
+      --accent: #145f4a;
+      --accent-2: #c98f37;
+      --border: #ddd3c2;
+      --danger: #9f2d2d;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+      color: var(--ink);
+      background: radial-gradient(circle at 20% 0%, #fff9ea 0%, var(--bg) 45%, #ede5d7 100%);
+    }
+    .wrap {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+    h1 {
+      margin: 0 0 8px;
+      font-size: 2rem;
+      letter-spacing: 0.01em;
+    }
+    .sub {
+      margin: 0 0 20px;
+      color: var(--muted);
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 16px;
+      margin-bottom: 16px;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.05);
+    }
+    .row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: center;
+    }
+    button, select {
+      border: 1px solid var(--border);
+      background: #fff;
+      color: var(--ink);
+      border-radius: 10px;
+      padding: 10px 12px;
+      font-size: 0.95rem;
+    }
+    button {
+      background: var(--accent);
+      color: #fff;
+      border-color: var(--accent);
+      cursor: pointer;
+    }
+    button.secondary {
+      background: #fff;
+      color: var(--ink);
+      border-color: var(--border);
+    }
+    button:disabled { opacity: 0.6; cursor: not-allowed; }
+    .status {
+      margin-top: 10px;
+      font-size: 0.93rem;
+      color: var(--muted);
+      white-space: pre-wrap;
+    }
+    .status.error { color: var(--danger); }
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 10px;
+      margin-top: 12px;
+    }
+    .pill {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px;
+      background: #fff;
+      font-size: 0.9rem;
+    }
+    .pill strong { display: block; font-size: 1rem; color: var(--accent); }
+    .table-wrap {
+      overflow: auto;
+      max-height: 65vh;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: #fff;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.85rem;
+      min-width: 720px;
+    }
+    th, td {
+      border-bottom: 1px solid #efe7da;
+      text-align: left;
+      padding: 8px;
+      vertical-align: top;
+    }
+    th {
+      position: sticky;
+      top: 0;
+      background: #fbf5e8;
+      color: #4a4339;
+      z-index: 1;
+    }
+    .meta {
+      font-size: 0.9rem;
+      color: var(--muted);
+      margin-bottom: 10px;
+    }
+    @media (max-width: 640px) {
+      h1 { font-size: 1.5rem; }
+      .wrap { padding: 14px; }
+      .row { align-items: stretch; }
+      button, select { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>DDM Proxy Cache Dashboard</h1>
+    <p class="sub">Warm cache, inspect cache keys, and view cached item data by page.</p>
+
+    <section class="card">
+      <div class="row">
+        <button id="warmBtn">Fetch All Data Into Cache</button>
+        <button id="refreshBtn" class="secondary">Refresh Cache Snapshot</button>
+      </div>
+      <div id="warmStatus" class="status">Idle</div>
+      <div id="summaryGrid" class="summary"></div>
+    </section>
+
+    <section class="card">
+      <div class="row">
+        <label for="cacheKeySelect">Cache Entry:</label>
+        <select id="cacheKeySelect">
+          <option value="">Select cached type/page</option>
+        </select>
+      </div>
+      <div id="tableMeta" class="meta">No cache entry selected.</div>
+      <div class="table-wrap">
+        <table id="itemsTable">
+          <thead><tr><th>Data</th></tr></thead>
+          <tbody><tr><td>Select a cache entry to view items.</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const warmBtn = document.getElementById("warmBtn");
+    const refreshBtn = document.getElementById("refreshBtn");
+    const warmStatus = document.getElementById("warmStatus");
+    const summaryGrid = document.getElementById("summaryGrid");
+    const cacheKeySelect = document.getElementById("cacheKeySelect");
+    const tableMeta = document.getElementById("tableMeta");
+    const itemsTable = document.getElementById("itemsTable");
+
+    let cacheEntries = [];
+
+    function setStatus(message, isError = false) {
+      warmStatus.textContent = message;
+      warmStatus.className = isError ? "status error" : "status";
+    }
+
+    function renderSummary(grouped) {
+      summaryGrid.innerHTML = "";
+      const order = ["natural", "lab", "watch", "jewelry"];
+      for (const type of order) {
+        const data = grouped[type] || { pages: 0, items: 0 };
+        const card = document.createElement("div");
+        card.className = "pill";
+        card.innerHTML = `<strong>${type}</strong>pages: ${data.pages}<br>items: ${data.items}`;
+        summaryGrid.appendChild(card);
+      }
+    }
+
+    function renderCacheOptions(entries) {
+      cacheEntries = entries;
+      cacheKeySelect.innerHTML = '<option value="">Select cached type/page</option>';
+
+      for (const entry of entries) {
+        const option = document.createElement("option");
+        option.value = entry.key;
+        option.textContent = `${entry.type} page ${entry.page} | ${entry.item_count} items | ${entry.fresh ? "fresh" : "stale"}`;
+        cacheKeySelect.appendChild(option);
+      }
+    }
+
+    function renderItems(items, key) {
+      if (!items.length) {
+        itemsTable.innerHTML = "<thead><tr><th>No items</th></tr></thead><tbody><tr><td>This cache entry has no items.</td></tr></tbody>";
+        return;
+      }
+
+      const columns = Object.keys(items[0]);
+      const head = `<thead><tr>${columns.map((col) => `<th>${col}</th>`).join("")}</tr></thead>`;
+      const bodyRows = items.map((item) => {
+        const cells = columns.map((col) => {
+          const raw = item[col];
+          const value = raw == null ? "" : (typeof raw === "object" ? JSON.stringify(raw) : String(raw));
+          return `<td>${value.replaceAll("<", "&lt;")}</td>`;
+        }).join("");
+        return `<tr>${cells}</tr>`;
+      }).join("");
+
+      itemsTable.innerHTML = `${head}<tbody>${bodyRows}</tbody>`;
+      tableMeta.textContent = `Showing ${items.length} cached items from ${key}`;
+    }
+
+    async function fetchCacheSnapshot() {
+      const res = await fetch("/api/proxy?action=cache");
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`Failed to load cache snapshot: ${res.status} ${text}`);
+      }
+      return res.json();
+    }
+
+    async function refreshSnapshot() {
+      setStatus("Refreshing cache snapshot...");
+      try {
+        const data = await fetchCacheSnapshot();
+        renderSummary(data.grouped || {});
+        renderCacheOptions(data.entries || []);
+        setStatus(`Snapshot loaded. ${data.total_entries || 0} cache entries available.`);
+      } catch (err) {
+        setStatus(err.message, true);
+      }
+    }
+
+    async function warmAll() {
+      warmBtn.disabled = true;
+      refreshBtn.disabled = true;
+      setStatus("Warming cache for all types and all pages. This can take a while...");
+
+      try {
+        const res = await fetch("/api/proxy?action=warm&mode=all&nocache=true");
+        const body = await res.json();
+        if (!res.ok) {
+          throw new Error(body.detail || body.error || "Warm request failed");
+        }
+
+        const typeLines = Object.entries(body.type_results || {})
+          .map(([type, t]) => `${type}: pages=${t.pages_warmed}, items=${t.items_warmed}${t.error ? `, error=${t.error}` : ""}`)
+          .join("\n");
+
+        setStatus(
+          `Warm completed. pages=${body.warmed_pages}, items=${body.warmed_items}\n${typeLines}`,
+          false
+        );
+
+        renderSummary((body.cache_after && body.cache_after.grouped) || {});
+        renderCacheOptions((body.cache_after && body.cache_after.entries) || []);
+      } catch (err) {
+        setStatus(err.message, true);
+      } finally {
+        warmBtn.disabled = false;
+        refreshBtn.disabled = false;
+      }
+    }
+
+    cacheKeySelect.addEventListener("change", async () => {
+      const key = cacheKeySelect.value;
+      if (!key) {
+        tableMeta.textContent = "No cache entry selected.";
+        itemsTable.innerHTML = "<thead><tr><th>Data</th></tr></thead><tbody><tr><td>Select a cache entry to view items.</td></tr></tbody>";
+        return;
+      }
+
+      tableMeta.textContent = `Loading items for ${key}...`;
+
+      try {
+        const res = await fetch(`/api/proxy?action=cache&key=${encodeURIComponent(key)}&includeItems=true&itemsLimit=200`);
+        const body = await res.json();
+        if (!res.ok) {
+          throw new Error(body.error || "Failed to fetch cache entry");
+        }
+
+        const items = (body.selected && body.selected.items) || [];
+        renderItems(items, key);
+      } catch (err) {
+        tableMeta.textContent = err.message;
+        itemsTable.innerHTML = "<thead><tr><th>Error</th></tr></thead><tbody><tr><td>Unable to load cache entry.</td></tr></tbody>";
+      }
+    });
+
+    warmBtn.addEventListener("click", warmAll);
+    refreshBtn.addEventListener("click", refreshSnapshot);
+
+    refreshSnapshot();
+  </script>
+</body>
+</html>
