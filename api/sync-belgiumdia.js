@@ -111,6 +111,28 @@ async function fetchBelgiumdiaData(type, page = 1, limit = 50) {
   }
 }
 
+async function fetchAllBelgiumdiaData(type, limit = 50) {
+  const allItems = [];
+  let page = 1;
+  let totalPages = 1;
+
+  while (page <= totalPages) {
+    const data = await fetchBelgiumdiaData(type, page, limit);
+    const items = data.items || [];
+
+    allItems.push(...items);
+    totalPages = data.total_pages || totalPages;
+
+    if (page >= totalPages || items.length === 0) {
+      break;
+    }
+
+    page++;
+  }
+
+  return allItems;
+}
+
 // Check if product exists in Shopify by SKU
 async function findProductBySku(sku, accessToken) {
   const options = {
@@ -299,8 +321,8 @@ async function syncBelgiumdia() {
       console.log(`\n[SYNC] Processing ${type}...`);
       
       try {
-        const data = await fetchBelgiumdiaData(type, 1, 50);
-        const items = (data.items || []).slice(0, 15); // Limit to 15 per type (60 total) for faster processing
+        const items = await fetchAllBelgiumdiaData(type, 50);
+        console.log(`[SYNC] Loaded ${items.length} ${type} items from Belgiumdia`);
 
         for (const item of items) {
           if (!item.Stock_No) {
