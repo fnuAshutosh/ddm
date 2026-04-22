@@ -19,6 +19,19 @@ const CACHE_TTL_MS = 15 * 60 * 1000; // 15 minutes
 // In-memory cache (persists across warm invocations on same instance)
 const cache = {};
 
+function parseSupplierItems(json) {
+  if (Array.isArray(json)) return json;
+  if (!json || typeof json !== "object") return [];
+
+  if (Array.isArray(json.data)) return json.data;
+  if (Array.isArray(json.diamond)) return json.diamond;
+  if (Array.isArray(json.watch)) return json.watch;
+  if (Array.isArray(json.jewelry)) return json.jewelry;
+
+  const firstArray = Object.values(json).find(Array.isArray);
+  return firstArray || [];
+}
+
 function buildSupplierUrl(type, page = 1) {
   const key = process.env.BELGUMDIA_API_KEY;
   if (!key) throw new Error("BELGUMDIA_API_KEY env var not set");
@@ -46,17 +59,17 @@ async function fetchWithCache(type, page = 1, skipCache = false) {
   const url = buildSupplierUrl(type, page);
   console.log(`[belgumdia-proxy] Fetching from: ${url.replace(/key=.+/, 'key=***')}`);
   
+  let timeoutId;
+
   try {
     // Fetch with 30 second timeout
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 30000);
+    timeoutId = setTimeout(() => controller.abort(), 30000);
     
     const res = await fetch(url, { 
       headers: { Accept: "application/json" },
       signal: controller.signal
     });
-    clearTimeout(timeoutId);
-
     if (!res.ok) {
       const errorText = await res.text();
       console.error(`[belgumdia-proxy] API error ${res.status}: ${errorText.substring(0, 200)}`);
@@ -66,21 +79,18 @@ async function fetchWithCache(type, page = 1, skipCache = false) {
     const json = await res.json();
     console.log(`[belgumdia-proxy] API response keys:`, Object.keys(json));
     
-    // Handle error message from API (rate limit, etc)
-    if (json.message && json.message !== "Success") {
-      console.warn(`[belgumdia-proxy] API message: ${json.message}`);
-    }
+    const items = parseSupplierItems(json);
 
-    // Response structure: {data: [], message: "Success"}
-    let items = [];
-    if (Array.isArray(json))              items = json;
-    else if (Array.isArray(json.data))    items = json.data;
-    else if (Array.isArray(json.diamond)) items = json.diamond;
-    else if (Array.isArray(json.watch))   items = json.watch;
-    else if (Array.isArray(json.jewelry)) items = json.jewelry;
-    else {
-      const firstArray = Object.values(json).find(Array.isArray);
-      items = firstArray || [];
+    // Treat supplier-level failures as hard errors so callers can distinguish
+    // empty inventory from upstream API errors.
+    if (json && typeof json === "object") {
+      const supplierMessage = typeof json.message === "string" ? json.message : "";
+      const explicitError = typeof json.error === "string" ? json.error : "";
+      const hasSupplierError = (supplierMessage && supplierMessage !== "Success") || explicitError;
+
+      if (hasSupplierError && items.length === 0) {
+        throw new Error(`Supplier message: ${explicitError || supplierMessage}`);
+      }
     }
 
     console.log(`[belgumdia-proxy] Found ${items.length} items for ${type}`);
@@ -89,9 +99,13 @@ async function fetchWithCache(type, page = 1, skipCache = false) {
     
   } catch (err) {
     console.error(`[belgumdia-proxy] Fetch error for ${type}:`, err.message);
-    // Return cached empty result on error
-    cache[cacheKey] = { items: [], fetchedAt: now };
-    return { items: [], fromCache: false, fetchedAt: now };
+    if (cached && !skipCache) {
+      console.warn(`[belgumdia-proxy] Serving stale cache for ${cacheKey} after fetch failure`);
+      return { items: cached.items, fromCache: true, fetchedAt: cached.fetchedAt, stale: true };
+    }
+    throw err;
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
   }
 }
 
@@ -176,7 +190,7 @@ module.exports = async function handler(req, res) {
   const pageSize = Math.min(PAGE_SIZE_MAX, Math.max(1, parseInt(limit, 10) || PAGE_SIZE_DEFAULT));
 
   try {
-    const { items, fromCache, fetchedAt } = await fetchWithCache(type, pageNum, skipCache);
+    const { items, fromCache, fetchedAt, stale } = await fetchWithCache(type, pageNum, skipCache);
 
     // Apply search + sort
     const filtered = applySort(applySearch(items, search), sort);
@@ -193,6 +207,7 @@ module.exports = async function handler(req, res) {
       "Cache-Control": "public, s-maxage=900, stale-while-revalidate=60",
       "X-Cache": fromCache ? "HIT" : "MISS",
       "X-Fetched-At": new Date(fetchedAt).toISOString(),
+        "X-Stale": stale ? "1" : "0",
     };
     setHeaders(res, responseHeaders);
 
@@ -204,6 +219,7 @@ module.exports = async function handler(req, res) {
       total_pages: totalPages,
       fetched_at: new Date(fetchedAt).toISOString(),
       cache_hit: fromCache,
+        stale: Boolean(stale),
       items: slice,
     };
 

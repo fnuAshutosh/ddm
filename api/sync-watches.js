@@ -276,6 +276,7 @@ async function syncWatches() {
   const startTime = Date.now();
   let totalCreated = 0;
   let totalSkipped = 0;
+  let totalFailed = 0;
 
   try {
     // Get access token
@@ -304,8 +305,13 @@ async function syncWatches() {
         }
 
         // Create new product
-        await createProduct(item, accessToken);
-        totalCreated++;
+        const created = await createProduct(item, accessToken);
+        if (created) {
+          totalCreated++;
+        } else {
+          totalFailed++;
+          console.log(`[WATCH SYNC] ❌ Failed to create watch: ${item.Stock_No}`);
+        }
 
         // Rate limiting: Shopify API allows 2 requests/sec
         await new Promise(resolve => setTimeout(resolve, 500));
@@ -316,13 +322,14 @@ async function syncWatches() {
 
     const duration = ((Date.now() - startTime) / 1000).toFixed(2);
     console.log(`\n========== WATCH SYNC COMPLETE ==========`);
-    console.log(`Created: ${totalCreated} | Skipped: ${totalSkipped} | Duration: ${duration}s\n`);
+    console.log(`Created: ${totalCreated} | Skipped: ${totalSkipped} | Failed: ${totalFailed} | Duration: ${duration}s\n`);
 
     return {
       success: true,
       type: 'watch',
       created: totalCreated,
       skipped: totalSkipped,
+      failed: totalFailed,
       duration: duration
     };
   } catch (e) {

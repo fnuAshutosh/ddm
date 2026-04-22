@@ -286,6 +286,7 @@ async function syncBelgiumdia() {
   const startTime = Date.now();
   let totalCreated = 0;
   let totalSkipped = 0;
+  let totalFailed = 0;
 
   try {
     // Get access token
@@ -318,8 +319,13 @@ async function syncBelgiumdia() {
           }
 
           // Create new product
-          await createProduct(item, type, accessToken);
-          totalCreated++;
+          const created = await createProduct(item, type, accessToken);
+          if (created) {
+            totalCreated++;
+          } else {
+            totalFailed++;
+            console.log(`[SYNC] ❌ Failed to create product: ${item.Stock_No}`);
+          }
 
           // Rate limiting: Shopify API allows 2 requests/sec
           await new Promise(resolve => setTimeout(resolve, 500));
@@ -331,12 +337,13 @@ async function syncBelgiumdia() {
 
     const duration = ((Date.now() - startTime) / 1000).toFixed(2);
     console.log(`\n========== SYNC COMPLETE ==========`);
-    console.log(`Created: ${totalCreated} | Skipped: ${totalSkipped} | Duration: ${duration}s\n`);
+    console.log(`Created: ${totalCreated} | Skipped: ${totalSkipped} | Failed: ${totalFailed} | Duration: ${duration}s\n`);
 
     return {
       success: true,
       created: totalCreated,
       skipped: totalSkipped,
+      failed: totalFailed,
       duration: duration
     };
   } catch (e) {
