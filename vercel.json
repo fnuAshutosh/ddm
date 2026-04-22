@@ -6,12 +6,40 @@
     },
     "api/sync-belgiumdia.js": {
       "maxDuration": 300
+    },
+    "api/sync-natural.js": {
+      "maxDuration": 300
+    },
+    "api/sync-lab.js": {
+      "maxDuration": 300
+    },
+    "api/sync-watch.js": {
+      "maxDuration": 300
+    },
+    "api/sync-jewelry.js": {
+      "maxDuration": 300
     }
   },
   "crons": [
     {
       "path": "/api/sync-belgiumdia.js",
       "schedule": "0 14 * * *"
+    },
+    {
+      "path": "/api/sync-natural.js",
+      "schedule": "0 14 * * *"
+    },
+    {
+      "path": "/api/sync-lab.js",
+      "schedule": "10 14 * * *"
+    },
+    {
+      "path": "/api/sync-watch.js",
+      "schedule": "20 14 * * *"
+    },
+    {
+      "path": "/api/sync-jewelry.js",
+      "schedule": "30 14 * * *"
     }
   ],
   "headers": [
