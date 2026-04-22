@@ -9,6 +9,28 @@ const STORE_DOMAIN = 'saatchiandco.myshopify.com';
 const PROXY_URL = 'https://ddm-theta.vercel.app/api/proxy';
 const API_VERSION = '2024-01';
 
+function logInfo(runId, message, extra = null) {
+  if (extra !== null) {
+    console.log(`[SYNC][${runId}] ${message}`, extra);
+    return;
+  }
+  console.log(`[SYNC][${runId}] ${message}`);
+}
+
+function logError(runId, message, extra = null) {
+  if (extra !== null) {
+    console.error(`[SYNC][${runId}] ${message}`, extra);
+    return;
+  }
+  console.error(`[SYNC][${runId}] ${message}`);
+}
+
+function safeSnippet(value, maxLen = 250) {
+  if (!value) return '';
+  const text = typeof value === 'string' ? value : JSON.stringify(value);
+  return text.length > maxLen ? `${text.slice(0, maxLen)}...` : text;
+}
+
 // Helper: Make HTTPS requests
 function makeRequest(options, body = null) {
   return new Promise((resolve, reject) => {
@@ -45,8 +67,8 @@ function makeRequest(options, body = null) {
 
 // Get Admin API access token using Client Credentials grant
 // This is called on every function invocation to ensure token is always fresh
-async function getAccessToken() {
-  console.log('[SYNC] Requesting fresh Admin API access token...');
+async function getAccessToken(runId) {
+  logInfo(runId, 'Requesting fresh Admin API access token');
   
   const clientId = process.env.SHOPIFY_CLIENT_ID;
   const clientSecret = process.env.SHOPIFY_CLIENT_SECRET;
@@ -77,21 +99,21 @@ async function getAccessToken() {
     
     if (response.status === 200 && response.body?.access_token) {
       const token = response.body.access_token;
-      console.log(`[SYNC] ✅ Got access token (expires in ${response.body.expires_in || 86400}s)`);
+      logInfo(runId, `Got access token (expires in ${response.body.expires_in || 86400}s)`);
       return token;
     } else {
       const errorDetail = response.body?.error || response.body?.errors || 'Unknown error';
       throw new Error(`Token request failed (${response.status}): ${JSON.stringify(errorDetail)}`);
     }
   } catch (e) {
-    console.error('[SYNC] ❌ Token request failed:', e.message);
+    logError(runId, `Token request failed: ${e.message}`);
     throw e;
   }
 }
 
 // Fetch belgiumdia data from proxy
-async function fetchBelgiumdiaData(type, page = 1, limit = 50) {
-  console.log(`[SYNC] Fetching belgiumdia ${type} data (page ${page})`);
+async function fetchBelgiumdiaData(type, page = 1, limit = 50, runId) {
+  logInfo(runId, `Fetching Belgiumdia data`, { type, page, limit });
   
   try {
     const url = new URL(PROXY_URL);
@@ -100,28 +122,50 @@ async function fetchBelgiumdiaData(type, page = 1, limit = 50) {
     url.searchParams.append('limit', limit);
 
     const response = await fetch(url.toString());
-    if (!response.ok) throw new Error(`Proxy returned ${response.status}`);
-    
+    if (!response.ok) {
+      const rawBody = await response.text();
+      logError(runId, `Proxy returned ${response.status} for ${type} page ${page}`, safeSnippet(rawBody));
+      throw new Error(`Proxy returned ${response.status}: ${safeSnippet(rawBody, 120)}`);
+    }
+
     const data = await response.json();
-    console.log(`[SYNC] Got ${(data.items || []).length} items from belgiumdia`);
+    logInfo(runId, `Fetched page from proxy`, {
+      type,
+      page,
+      received_items: (data.items || []).length,
+      total_pages: data.total_pages || null,
+      cache_hit: Boolean(data.cache_hit),
+      stale: Boolean(data.stale),
+    });
     return data;
   } catch (e) {
-    console.error(`[SYNC] Failed to fetch belgiumdia data:`, e.message);
+    logError(runId, `Failed to fetch Belgiumdia data for ${type} page ${page}: ${e.message}`);
     throw e;
   }
 }
 
-async function fetchAllBelgiumdiaData(type, limit = 50) {
+async function fetchAllBelgiumdiaData(type, limit = 50, runId) {
   const allItems = [];
   let page = 1;
   let totalPages = 1;
+  let pagesFetched = 0;
+
+  logInfo(runId, `Starting full fetch for ${type}`);
 
   while (page <= totalPages) {
-    const data = await fetchBelgiumdiaData(type, page, limit);
+    const data = await fetchBelgiumdiaData(type, page, limit, runId);
     const items = data.items || [];
 
     allItems.push(...items);
     totalPages = data.total_pages || totalPages;
+    pagesFetched++;
+
+    logInfo(runId, `Page progress for ${type}`, {
+      page,
+      total_pages: totalPages,
+      page_items: items.length,
+      cumulative_items: allItems.length,
+    });
 
     if (page >= totalPages || items.length === 0) {
       break;
@@ -130,11 +174,11 @@ async function fetchAllBelgiumdiaData(type, limit = 50) {
     page++;
   }
 
-  return allItems;
+  return { items: allItems, pagesFetched, totalPages };
 }
 
 // Check if product exists in Shopify by SKU
-async function findProductBySku(sku, accessToken) {
+async function findProductBySku(sku, accessToken, runId) {
   const options = {
     hostname: STORE_DOMAIN,
     path: `/admin/api/${API_VERSION}/graphql.json`,
@@ -171,13 +215,13 @@ async function findProductBySku(sku, accessToken) {
     const edges = response.body?.data?.products?.edges || [];
     return edges.length > 0 ? edges[0].node : null;
   } catch (e) {
-    console.error(`[SYNC] Error finding product by SKU ${sku}:`, e.message);
+    logError(runId, `Error finding product by SKU ${sku}: ${e.message}`);
     return null;
   }
 }
 
 // Create Shopify product
-async function createProduct(item, type, accessToken) {
+async function createProduct(item, type, accessToken, runId) {
   const title = item.Shape ? 
     `${item.Shape.charAt(0).toUpperCase() + item.Shape.slice(1).toLowerCase()}${item.Weight ? ' - ' + item.Weight + 'ct' : ''}` : 
     (item.Name || 'Product');
@@ -231,27 +275,27 @@ async function createProduct(item, type, accessToken) {
     const response = await makeRequest(options, body);
     
     if (response.status !== 201) {
-      console.error(`[SYNC] Failed to create product: ${response.status}`, response.body);
+      logError(runId, `Failed to create product SKU=${item.Stock_No} status=${response.status}`, safeSnippet(response.body));
       return null;
     }
 
     const productId = response.body.product.id;
-    console.log(`[SYNC] ✅ Created product: ${title} (ID: ${productId})`);
+    logInfo(runId, `Created product SKU=${item.Stock_No} ID=${productId} type=${type}`);
     
     // Add to collection if specified
     if (collection_type) {
-      await addProductToCollection(productId, collection_type, accessToken);
+      await addProductToCollection(productId, collection_type, accessToken, runId);
     }
     
     return response.body.product;
   } catch (e) {
-    console.error(`[SYNC] Error creating product:`, e.message);
+    logError(runId, `Error creating product SKU=${item.Stock_No}: ${e.message}`);
     return null;
   }
 }
 
 // Add product to collection
-async function addProductToCollection(productId, collectionHandle, accessToken) {
+async function addProductToCollection(productId, collectionHandle, accessToken, runId) {
   const options = {
     hostname: STORE_DOMAIN,
     path: `/admin/api/${API_VERSION}/graphql.json`,
@@ -280,7 +324,7 @@ async function addProductToCollection(productId, collectionHandle, accessToken) 
     const collections = findResponse.body?.data?.collections?.edges || [];
     
     if (collections.length === 0) {
-      console.log(`[SYNC] ⚠️  Collection not found: ${collectionHandle}`);
+      logInfo(runId, `Collection not found: ${collectionHandle}`);
       return;
     }
 
@@ -295,83 +339,128 @@ async function addProductToCollection(productId, collectionHandle, accessToken) 
       }`
     };
 
-    await makeRequest(options, addQuery);
-    console.log(`[SYNC] Added product to collection: ${collectionHandle}`);
+    const addResponse = await makeRequest(options, addQuery);
+    const addErrors = addResponse.body?.data?.collectionProductsAdd?.userErrors || [];
+    if (addErrors.length > 0) {
+      logError(runId, `Collection add returned userErrors for ${collectionHandle}`, addErrors);
+      return;
+    }
+
+    logInfo(runId, `Added product ${productId} to collection: ${collectionHandle}`);
   } catch (e) {
-    console.log(`[SYNC] Could not add to collection ${collectionHandle}: ${e.message}`);
+    logError(runId, `Could not add to collection ${collectionHandle}: ${e.message}`);
   }
 }
 
 // Main sync function
-async function syncBelgiumdia() {
-  console.log('\n========== BELGIUMDIA SYNC START ==========');
+async function syncBelgiumdia(runId) {
+  logInfo(runId, '========== BELGIUMDIA SYNC START ==========');
   const startTime = Date.now();
   let totalCreated = 0;
   let totalSkipped = 0;
   let totalFailed = 0;
+  const typeSummary = {};
 
   try {
     // Get access token
-    const accessToken = await getAccessToken();
+    const accessToken = await getAccessToken(runId);
 
     // Sync each product type - only first page (50 items per type = ~200 total)
     const types = ['natural', 'lab', 'watch', 'jewelry'];
+    logInfo(runId, 'Sync started for types', types);
     
     for (const type of types) {
-      console.log(`\n[SYNC] Processing ${type}...`);
+      logInfo(runId, `Processing type=${type}`);
+      const perType = {
+        loaded: 0,
+        pages_fetched: 0,
+        created: 0,
+        skipped: 0,
+        failed: 0,
+        error: null,
+      };
       
       try {
-        const items = await fetchAllBelgiumdiaData(type, 50);
-        console.log(`[SYNC] Loaded ${items.length} ${type} items from Belgiumdia`);
+        const { items, pagesFetched, totalPages } = await fetchAllBelgiumdiaData(type, 50, runId);
+        perType.loaded = items.length;
+        perType.pages_fetched = pagesFetched;
+        logInfo(runId, `Loaded ${items.length} ${type} items`, { pages_fetched: pagesFetched, total_pages: totalPages });
+
+        let processedForType = 0;
 
         for (const item of items) {
+          processedForType++;
+
           if (!item.Stock_No) {
-            console.log(`[SYNC] Skipping item without SKU`);
+            logInfo(runId, `Skipping ${type} item without SKU`);
             totalSkipped++;
+            perType.skipped++;
             continue;
           }
 
           // Check if product already exists
-          const existing = await findProductBySku(item.Stock_No, accessToken);
+          const existing = await findProductBySku(item.Stock_No, accessToken, runId);
           
           if (existing) {
-            console.log(`[SYNC] ⏭️  Product already exists: ${item.Stock_No}`);
+            logInfo(runId, `Product already exists, skipping SKU=${item.Stock_No}`);
             totalSkipped++;
+            perType.skipped++;
             continue;
           }
 
           // Create new product
-          const created = await createProduct(item, type, accessToken);
+          const created = await createProduct(item, type, accessToken, runId);
           if (created) {
             totalCreated++;
+            perType.created++;
           } else {
             totalFailed++;
-            console.log(`[SYNC] ❌ Failed to create product: ${item.Stock_No}`);
+            perType.failed++;
+            logError(runId, `Failed to create product SKU=${item.Stock_No}`);
+          }
+
+          if (processedForType % 25 === 0) {
+            logInfo(runId, `Progress type=${type}`, {
+              processed: processedForType,
+              total_items: items.length,
+              created: perType.created,
+              skipped: perType.skipped,
+              failed: perType.failed,
+            });
           }
 
           // Rate limiting: Shopify API allows 2 requests/sec
           await new Promise(resolve => setTimeout(resolve, 500));
         }
+
+        typeSummary[type] = perType;
+        logInfo(runId, `Completed type=${type}`, perType);
       } catch (e) {
-        console.error(`[SYNC] Error processing ${type}:`, e.message);
+        perType.error = e.message;
+        typeSummary[type] = perType;
+        logError(runId, `Error processing ${type}: ${e.message}`);
       }
     }
 
     const duration = ((Date.now() - startTime) / 1000).toFixed(2);
-    console.log(`\n========== SYNC COMPLETE ==========`);
-    console.log(`Created: ${totalCreated} | Skipped: ${totalSkipped} | Failed: ${totalFailed} | Duration: ${duration}s\n`);
+    logInfo(runId, '========== SYNC COMPLETE ==========');
+    logInfo(runId, `Summary: Created=${totalCreated} Skipped=${totalSkipped} Failed=${totalFailed} Duration=${duration}s`);
+    logInfo(runId, 'Type summary', typeSummary);
 
     return {
       success: true,
+      run_id: runId,
       created: totalCreated,
       skipped: totalSkipped,
       failed: totalFailed,
-      duration: duration
+      duration: duration,
+      type_summary: typeSummary,
     };
   } catch (e) {
-    console.error('[SYNC] FATAL ERROR:', e.message);
+    logError(runId, `FATAL ERROR: ${e.message}`);
     return {
       success: false,
+      run_id: runId,
       error: e.message
     };
   }
@@ -379,24 +468,31 @@ async function syncBelgiumdia() {
 
 // Vercel handler
 module.exports = async (req, res) => {
+  const runId = `run_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+
   // Add CORS headers
   res.setHeader('Access-Control-Allow-Credentials', 'true');
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
   res.setHeader('Access-Control-Allow-Headers', 'X-CSRF-Token,X-Requested-With,Accept,Accept-Version,Content-Length,Content-MD5,Content-Type,Date,X-Api-Version,X-Response-Time,X-Request-Id');
+  res.setHeader('X-Sync-Run-Id', runId);
+
+  logInfo(runId, `Incoming request method=${req.method}`);
 
   if (req.method === 'OPTIONS') {
+    logInfo(runId, 'Handled OPTIONS preflight');
     res.status(200).end();
     return;
   }
 
   try {
-    const result = await syncBelgiumdia();
+    const result = await syncBelgiumdia(runId);
     res.status(200).json(result);
   } catch (e) {
-    console.error('Handler error:', e);
+    logError(runId, `Handler error: ${e.message}`);
     res.status(500).json({
       success: false,
+      run_id: runId,
       error: e.message
     });
   }
