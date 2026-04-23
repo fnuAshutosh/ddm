@@ -71,6 +71,42 @@ via the Theme Editor code view or Theme Kit.
 
 ## API Reference
 
+### All API URLs
+
+Replace `<YOUR_VERCEL_URL>` with your deployment URL (for example, `https://ddm-theta.vercel.app`).
+
+#### Proxy endpoints
+
+- `GET <YOUR_VERCEL_URL>/api/proxy?type=natural`
+- `GET <YOUR_VERCEL_URL>/api/proxy?type=lab`
+- `GET <YOUR_VERCEL_URL>/api/proxy?type=watch`
+- `GET <YOUR_VERCEL_URL>/api/proxy?type=jewelry`
+- `GET <YOUR_VERCEL_URL>/api/proxy?type=natural&page=1&limit=50&search=round&sort=price_asc`
+- `GET <YOUR_VERCEL_URL>/api/proxy?action=cache`
+- `GET <YOUR_VERCEL_URL>/api/proxy?action=cache&key=natural_page1&includeItems=true&itemsLimit=100`
+- `GET <YOUR_VERCEL_URL>/api/proxy?action=warm`
+- `GET <YOUR_VERCEL_URL>/api/proxy?action=warm&mode=all&types=natural,lab,watch,jewelry`
+
+#### Sync endpoints
+
+- `GET <YOUR_VERCEL_URL>/api/sync-belgiumdia`
+- `GET <YOUR_VERCEL_URL>/api/sync-natural`
+- `GET <YOUR_VERCEL_URL>/api/sync-lab`
+- `GET <YOUR_VERCEL_URL>/api/sync-watch`
+- `GET <YOUR_VERCEL_URL>/api/sync-jewelry`
+- `GET <YOUR_VERCEL_URL>/api/sync-watches`
+- `POST <YOUR_VERCEL_URL>/api/sync-belgiumdia-bulk` (requires `Authorization: Bearer <token>`)
+
+#### Watch view endpoint
+
+- `GET <YOUR_VERCEL_URL>/api/watches?page=1&limit=50`
+
+#### Test endpoints
+
+- `GET <YOUR_VERCEL_URL>/api/test-create-product`
+- `GET <YOUR_VERCEL_URL>/api/test-complete-product`
+- `GET <YOUR_VERCEL_URL>/api/test-hardcoded`
+
 ### `GET /api/proxy`
 
 | Parameter | Type | Required | Description |

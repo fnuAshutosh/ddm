@@ -44,13 +44,19 @@ function makeRequest(options, body = null) {
 
 // Get Admin API access token using Client Credentials grant
 async function getAccessToken() {
-  console.log('[WATCH SYNC] Requesting fresh Admin API access token...');
+  const configuredToken = (process.env.SHOPIFY_ACCESS_TOKEN || process.env.SHOPIFY_ADMIN_ACCESS_TOKEN || '').trim();
+  if (configuredToken) {
+    console.log('[WATCH SYNC] Using Admin API token from environment');
+    return configuredToken;
+  }
+
+  console.log('[WATCH SYNC] Requesting fresh Admin API access token via OAuth...');
   
   const clientId = process.env.SHOPIFY_CLIENT_ID;
   const clientSecret = process.env.SHOPIFY_CLIENT_SECRET;
   
   if (!clientId || !clientSecret) {
-    throw new Error('Missing SHOPIFY_CLIENT_ID or SHOPIFY_CLIENT_SECRET');
+    throw new Error('Missing SHOPIFY_ACCESS_TOKEN/SHOPIFY_ADMIN_ACCESS_TOKEN or SHOPIFY_CLIENT_ID/SHOPIFY_CLIENT_SECRET');
   }
 
   const tokenBody = querystring.stringify({

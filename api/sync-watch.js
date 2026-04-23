@@ -37,6 +37,12 @@ function safeSnippet(value, maxLen = 250) {
   return text.length > maxLen ? `${text.slice(0, maxLen)}...` : text;
 }
 
+function parsePositiveInt(value, fallback, min = 1, max = Number.MAX_SAFE_INTEGER) {
+  const parsed = parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed < min) return fallback;
+  return Math.min(parsed, max);
+}
+
 function loadProgress() {
   try {
     if (fs.existsSync(PROGRESS_FILE)) {
@@ -103,13 +109,19 @@ function makeRequest(options, body = null) {
 }
 
 async function getAccessToken(runId) {
-  logInfo(runId, 'Requesting fresh Admin API access token');
+  const configuredToken = (process.env.SHOPIFY_ACCESS_TOKEN || process.env.SHOPIFY_ADMIN_ACCESS_TOKEN || '').trim();
+  if (configuredToken) {
+    logInfo(runId, 'Using Admin API token from environment');
+    return configuredToken;
+  }
+
+  logInfo(runId, 'Requesting fresh Admin API access token via OAuth');
   
   const clientId = process.env.SHOPIFY_CLIENT_ID;
   const clientSecret = process.env.SHOPIFY_CLIENT_SECRET;
   
   if (!clientId || !clientSecret) {
-    throw new Error('Missing SHOPIFY_CLIENT_ID or SHOPIFY_CLIENT_SECRET');
+    throw new Error('Missing SHOPIFY_ACCESS_TOKEN/SHOPIFY_ADMIN_ACCESS_TOKEN or SHOPIFY_CLIENT_ID/SHOPIFY_CLIENT_SECRET');
   }
 
   const tokenBody = querystring.stringify({
@@ -356,7 +368,8 @@ async function addProductToCollection(productId, collectionHandle, accessToken, 
   }
 }
 
-async function syncWatch(runId) {
+async function syncWatch(runId, options = {}) {
+  const maxCreates = parsePositiveInt(options.maxCreates, BATCH_SIZE, 1, BATCH_SIZE);
   logInfo(runId, '========== WATCH SYNC START ==========');
   const startTime = Date.now();
   
@@ -366,6 +379,7 @@ async function syncWatch(runId) {
     current_item_index: progress.current_item_index,
     total_created: progress.total_items_created,
     total_skipped: progress.total_items_skipped,
+    max_creates_this_run: maxCreates,
   });
 
   if (progress.cooldown_until && Date.now() < progress.cooldown_until) {
@@ -391,6 +405,7 @@ async function syncWatch(runId) {
     let createdThisRun = 0;
     let skippedThisRun = 0;
     let failedThisRun = 0;
+    let stoppedByLimit = false;
 
     while (pagesProcessedThisRun < PAGES_PER_RUN) {
       logInfo(runId, `Fetching page ${progress.current_page}`);
@@ -424,6 +439,12 @@ async function syncWatch(runId) {
       logInfo(runId, `Processing ${items.length} items from page ${progress.current_page}`);
 
       for (let i = progress.current_item_index; i < items.length; i++) {
+        if (createdThisRun >= maxCreates) {
+          stoppedByLimit = true;
+          logInfo(runId, `Create limit reached for this run (${maxCreates})`);
+          break;
+        }
+
         const item = items[i];
 
         if (!item.Stock) {
@@ -459,6 +480,11 @@ async function syncWatch(runId) {
         await new Promise(resolve => setTimeout(resolve, 500));
       }
 
+      if (stoppedByLimit) {
+        saveProgress(progress);
+        break;
+      }
+
       if (progress.current_page < totalPages) {
         progress.current_page++;
         progress.current_item_index = 0;
@@ -477,8 +503,11 @@ async function syncWatch(runId) {
 
     return {
       success: true,
-      status: 'PROGRESS',
+      status: stoppedByLimit ? 'LIMIT_REACHED' : 'PROGRESS',
       run_id: runId,
+      limits: {
+        max_create: maxCreates,
+      },
       session: {
         created: createdThisRun,
         skipped: skippedThisRun,
@@ -525,7 +554,10 @@ module.exports = async (req, res) => {
   }
 
   try {
-    const result = await syncWatch(runId);
+    const headerMaxCreate = req.headers['x-max-create'] || req.headers['max-create'];
+    const maxCreateInput = req.query.max_create ?? headerMaxCreate;
+    const maxCreates = parsePositiveInt(maxCreateInput, BATCH_SIZE, 1, BATCH_SIZE);
+    const result = await syncWatch(runId, { maxCreates });
     res.status(200).json(result);
   } catch (e) {
     logError(runId, `Handler error: ${e.message}`);
