@@ -37,6 +37,12 @@ function safeSnippet(value, maxLen = 250) {
   return text.length > maxLen ? `${text.slice(0, maxLen)}...` : text;
 }
 
+function parsePositiveInt(value, fallback, min = 1, max = Number.MAX_SAFE_INTEGER) {
+  const parsed = parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed < min) return fallback;
+  return Math.min(parsed, max);
+}
+
 function loadProgress() {
   try {
     if (fs.existsSync(PROGRESS_FILE)) {
@@ -365,7 +371,8 @@ async function addProductToCollection(productId, collectionHandle, accessToken, 
   }
 }
 
-async function syncJewelry(runId) {
+async function syncJewelry(runId, options = {}) {
+  const maxCreates = parsePositiveInt(options.maxCreates, BATCH_SIZE, 1, BATCH_SIZE);
   logInfo(runId, '========== JEWELRY SYNC START ==========');
   const startTime = Date.now();
   
@@ -375,6 +382,7 @@ async function syncJewelry(runId) {
     current_item_index: progress.current_item_index,
     total_created: progress.total_items_created,
     total_skipped: progress.total_items_skipped,
+    max_creates_this_run: maxCreates,
   });
 
   if (progress.cooldown_until && Date.now() < progress.cooldown_until) {
@@ -400,6 +408,7 @@ async function syncJewelry(runId) {
     let createdThisRun = 0;
     let skippedThisRun = 0;
     let failedThisRun = 0;
+    let stoppedByLimit = false;
 
     while (pagesProcessedThisRun < PAGES_PER_RUN) {
       logInfo(runId, `Fetching page ${progress.current_page}`);
@@ -433,6 +442,12 @@ async function syncJewelry(runId) {
       logInfo(runId, `Processing ${items.length} items from page ${progress.current_page}`);
 
       for (let i = progress.current_item_index; i < items.length; i++) {
+        if (createdThisRun >= maxCreates) {
+          stoppedByLimit = true;
+          logInfo(runId, `Create limit reached for this run (${maxCreates})`);
+          break;
+        }
+
         const item = items[i];
 
         if (!item.item) {
@@ -468,6 +483,11 @@ async function syncJewelry(runId) {
         await new Promise(resolve => setTimeout(resolve, 500));
       }
 
+      if (stoppedByLimit) {
+        saveProgress(progress);
+        break;
+      }
+
       if (progress.current_page < totalPages) {
         progress.current_page++;
         progress.current_item_index = 0;
@@ -486,8 +506,11 @@ async function syncJewelry(runId) {
 
     return {
       success: true,
-      status: 'PROGRESS',
+      status: stoppedByLimit ? 'LIMIT_REACHED' : 'PROGRESS',
       run_id: runId,
+      limits: {
+        max_create: maxCreates,
+      },
       session: {
         created: createdThisRun,
         skipped: skippedThisRun,
@@ -534,7 +557,10 @@ module.exports = async (req, res) => {
   }
 
   try {
-    const result = await syncJewelry(runId);
+    const headerMaxCreate = req.headers['x-max-create'] || req.headers['max-create'];
+    const maxCreateInput = req.query.max_create ?? headerMaxCreate;
+    const maxCreates = parsePositiveInt(maxCreateInput, BATCH_SIZE, 1, BATCH_SIZE);
+    const result = await syncJewelry(runId, { maxCreates });
     res.status(200).json(result);
   } catch (e) {
     logError(runId, `Handler error: ${e.message}`);
