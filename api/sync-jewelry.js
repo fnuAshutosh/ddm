@@ -241,13 +241,16 @@ async function findProductBySku(sku, accessToken, runId) {
 }
 
 async function createProduct(item, accessToken, runId) {
-  const title = item.Name || 'Jewelry';
+  const title = item.remarks || 'Jewelry';
 
   const description = [
-    item.Type ? `Type: ${item.Type}` : null,
-    item.Style ? `Style: ${item.Style}` : null,
-    item.Material ? `Material: ${item.Material}` : null,
-    item.Description ? item.Description : null
+    item.section ? `Section: ${item.section}` : null,
+    item.jew_type ? `Type: ${item.jew_type}` : null,
+    item.metal_type ? `Metal: ${item.metal_type}` : null,
+    item.metal_weight ? `Metal Weight: ${item.metal_weight}g` : null,
+    item.diamond_weight ? `Diamond Weight: ${item.diamond_weight}ct` : null,
+    item.diamond_pcs ? `Diamond Pieces: ${item.diamond_pcs}` : null,
+    item.size_inch ? `Size: ${item.size_inch}"` : null
   ].filter(Boolean).join(' | ');
 
   const options = {
@@ -270,14 +273,14 @@ async function createProduct(item, accessToken, runId) {
       status: 'active',
       variants: [
         {
-          sku: item.Stock_No,
-          price: parseFloat(item.Buy_Price) || 0,
-          barcode: item.Stock_No,
+          sku: item.item,
+          price: parseFloat(item.price) || 0,
+          barcode: item.item,
           inventory_quantity: 1,
           requires_shipping: false
         }
       ],
-      images: item.ImageLink ? [{ src: item.ImageLink }] : []
+      images: item.images ? item.images.map(src => ({ src })) : []
     }
   };
 
@@ -285,18 +288,18 @@ async function createProduct(item, accessToken, runId) {
     const response = await makeRequest(options, body);
     
     if (response.status !== 201) {
-      logError(runId, `Failed to create product SKU=${item.Stock_No} status=${response.status}`, safeSnippet(response.body));
+      logError(runId, `Failed to create product SKU=${item.item} status=${response.status}`, safeSnippet(response.body));
       return null;
     }
 
     const productId = response.body.product.id;
-    logInfo(runId, `Created product SKU=${item.Stock_No} ID=${productId}`);
+    logInfo(runId, `Created product SKU=${item.item} ID=${productId}`);
     
     await addProductToCollection(productId, 'Jewelry', accessToken, runId);
     
     return response.body.product;
   } catch (e) {
-    logError(runId, `Error creating product SKU=${item.Stock_No}: ${e.message}`);
+    logError(runId, `Error creating product SKU=${item.item}: ${e.message}`);
     return null;
   }
 }
@@ -426,17 +429,17 @@ async function syncJewelry(runId) {
       for (let i = progress.current_item_index; i < items.length; i++) {
         const item = items[i];
 
-        if (!item.Stock_No) {
+        if (!item.item) {
           logInfo(runId, `Skipping item without SKU at index ${i}`);
           skippedThisRun++;
           progress.total_items_skipped++;
           continue;
         }
 
-        const existing = await findProductBySku(item.Stock_No, accessToken, runId);
+        const existing = await findProductBySku(item.item, accessToken, runId);
         
         if (existing) {
-          logInfo(runId, `Product already exists, skipping SKU=${item.Stock_No}`);
+          logInfo(runId, `Product already exists, skipping SKU=${item.item}`);
           skippedThisRun++;
           progress.total_items_skipped++;
           progress.current_item_index = i + 1;

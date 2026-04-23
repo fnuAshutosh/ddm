@@ -270,7 +270,7 @@ async function createProduct(item, accessToken, runId) {
       status: 'active',
       variants: [
         {
-          sku: item.Stock_No,
+          sku: item.Stock,
           price: parseFloat(item.Buy_Price) || 0,
           barcode: item.Stock_No,
           inventory_quantity: 1,
@@ -426,17 +426,17 @@ async function syncWatch(runId) {
       for (let i = progress.current_item_index; i < items.length; i++) {
         const item = items[i];
 
-        if (!item.Stock_No) {
+        if (!item.Stock) {
           logInfo(runId, `Skipping item without SKU at index ${i}`);
           skippedThisRun++;
           progress.total_items_skipped++;
           continue;
         }
 
-        const existing = await findProductBySku(item.Stock_No, accessToken, runId);
+        const existing = await findProductBySku(item.Stock, accessToken, runId);
         
         if (existing) {
-          logInfo(runId, `Product already exists, skipping SKU=${item.Stock_No}`);
+          logInfo(runId, `Product already exists, skipping SKU=${item.Stock}`);
           skippedThisRun++;
           progress.total_items_skipped++;
           progress.current_item_index = i + 1;
