@@ -305,15 +305,29 @@ async function createProduct(item, accessToken, runId) {
     if (Number.isFinite(parsed) && parsed > 0) inventoryQuantity = parsed;
   }
 
-  // Collect images (preserve order, skip duplicates)
+  // Collect images and videos for media array
   const imageUrls = [];
+  const mediaArray = [];
   const pushImage = (url, alt) => {
     if (!url) return;
-    if (!imageUrls.find(i => i.src === url)) imageUrls.push(alt ? { src: url, alt } : { src: url });
+    if (!imageUrls.find(i => i.src === url)) {
+      imageUrls.push(alt ? { src: url, alt } : { src: url });
+      // Also add to media as image
+      mediaArray.push({ media_type: 'image', src: url, alt: alt || '' });
+    }
   };
   pushImage(item.ImageLink, `${item.Brand || ''} ${item.Model || ''}`.trim());
   pushImage(item.ImageLink1);
   pushImage(item.ImageLink2);
+  
+  // Add video to media if available
+  if (item.VideoLink) {
+    mediaArray.push({ 
+      media_type: 'external_video', 
+      external_video_url: item.VideoLink,
+      alt: `${item.Brand || ''} ${item.Model || ''}`.trim()
+    });
+  }
 
   // Build options (only include names if values exist)
   const optionNames = [];
@@ -354,7 +368,8 @@ async function createProduct(item, accessToken, runId) {
       status: 'active',
       options: optionsArray,
       variants: [variant],
-      images: imageUrls
+      images: imageUrls,
+      media: mediaArray
     }
   };
 

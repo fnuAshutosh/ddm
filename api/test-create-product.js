@@ -46,6 +46,24 @@ function getBasicAuth() {
   return `Basic ${credentials}`;
 }
 
+// Prefer Admin access token if available, otherwise fall back to Basic auth
+function getAuthHeaders() {
+  const token = (process.env.SHOPIFY_ACCESS_TOKEN || process.env.SHOPIFY_ADMIN_ACCESS_TOKEN || '').trim();
+  if (token) {
+    return { 'X-Shopify-Access-Token': token };
+  }
+
+  // fallback to basic auth if client id/secret are provided
+  const clientId = process.env.SHOPIFY_CLIENT_ID;
+  const clientSecret = process.env.SHOPIFY_CLIENT_SECRET;
+  if (clientId && clientSecret) {
+    const credentials = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
+    return { 'Authorization': `Basic ${credentials}` };
+  }
+
+  throw new Error('Missing Shopify credentials: set SHOPIFY_ACCESS_TOKEN or SHOPIFY_CLIENT_ID and SHOPIFY_CLIENT_SECRET');
+}
+
 // Fetch ONE item from belgiumdia
 async function fetchOneProduct() {
   console.log('[TEST] Fetching one product from belgiumdia...');
@@ -109,7 +127,7 @@ async function createProductInShopify(item) {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': getBasicAuth()
+      ...getAuthHeaders()
     }
   };
 
@@ -121,11 +139,29 @@ async function createProductInShopify(item) {
     if (Number.isFinite(parsed) && parsed >= 0) inventoryQuantity = parsed;
   }
 
+  // Collect images and videos for media array
   const imageUrls = [];
-  const pushImage = (url, alt) => { if (!url) return; if (!imageUrls.find(i => i.src === url)) imageUrls.push(alt ? { src: url, alt } : { src: url }); };
+  const mediaArray = [];
+  const pushImage = (url, alt) => { 
+    if (!url) return; 
+    if (!imageUrls.find(i => i.src === url)) {
+      imageUrls.push(alt ? { src: url, alt } : { src: url });
+      // Also add to media as image
+      mediaArray.push({ media_type: 'image', src: url, alt: alt || '' });
+    }
+  };
   pushImage(item.ImageLink, `${item.Brand || ''} ${item.Model || ''}`.trim());
   pushImage(item.ImageLink1);
   pushImage(item.ImageLink2);
+  
+  // Add video to media if available
+  if (item.VideoLink) {
+    mediaArray.push({ 
+      media_type: 'external_video', 
+      external_video_url: item.VideoLink,
+      alt: `${item.Brand || ''} ${item.Model || ''}`.trim()
+    });
+  }
 
   const optionNames = [];
   if (item.MM) optionNames.push('Size (MM)');
@@ -158,7 +194,8 @@ async function createProductInShopify(item) {
       status: 'active',
       options: optionsArray,
       variants: [variant],
-      images: imageUrls
+      images: imageUrls,
+      media: mediaArray
     }
   };
 
