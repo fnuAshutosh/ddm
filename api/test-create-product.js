@@ -158,7 +158,7 @@ async function createProductInShopify(item) {
   if (item.VideoLink) {
     mediaArray.push({ 
       media_type: 'external_video', 
-      external_video_url: item.VideoLink,
+      src: item.VideoLink,
       alt: `${item.Brand || ''} ${item.Model || ''}`.trim()
     });
   }
