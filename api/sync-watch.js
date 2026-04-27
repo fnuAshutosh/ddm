@@ -253,16 +253,39 @@ async function findProductBySku(sku, accessToken, runId) {
 }
 
 async function createProduct(item, accessToken, runId) {
-  const title = item.Name || 'Watch';
+  const title = item.Name || `${item.Brand || ''} ${item.Model || ''}`.trim() || 'Watch';
 
-  const description = [
-    item.Brand ? `Brand: ${item.Brand}` : null,
-    item.Model ? `Model: ${item.Model}` : null,
-    item.Style ? `Style: ${item.Style}` : null,
-    item.Description ? item.Description : null
-  ].filter(Boolean).join(' | ');
+  // Build a rich HTML description that includes all incoming fields
+  const descriptionLines = [];
+  const add = (label, value) => {
+    if (!value && value !== 0) return;
+    descriptionLines.push(`<strong>${label}:</strong> ${value}`);
+  };
 
-  const options = {
+  add('Brand', item.Brand);
+  add('Model', item.Model);
+  add('MM', item.MM);
+  add('Metal', item.Metal);
+  add('Bracelet', item.Bracelet);
+  add('Dial', item.Dial);
+  add('Bezel', item.Bezel);
+  add('Condition', item.Condition);
+  add('Links', item.Links);
+  add('Box', item.Box);
+  add('Paper', item.Paper);
+  add('Reference', item.Reference);
+  add('Year', item.Year);
+  add('Comment', item.Comment);
+  add('Movement', item.Movement);
+  add('Case', item.Case);
+  add('Availability', item.Availability);
+  add('DnaLink', item.DnaLink);
+  add('VideoLink', item.VideoLink);
+  add('Price', item.Price || item.Buy_Price);
+
+  const description = descriptionLines.length > 0 ? `<p>${descriptionLines.join('</p><p>')}</p>` : (item.Description || '');
+
+  const optionsReq = {
     hostname: STORE_DOMAIN,
     path: `/admin/api/${API_VERSION}/products.json`,
     method: 'POST',
@@ -272,29 +295,71 @@ async function createProduct(item, accessToken, runId) {
     }
   };
 
+  // Price fallback: prefer Price, then Buy_Price
+  const price = parseFloat(item.Price || item.Buy_Price) || 0;
+
+  // Inventory: if Availability is numeric use it, otherwise default to 1
+  let inventoryQuantity = 1;
+  if (item.Availability) {
+    const parsed = parseInt(String(item.Availability).replace(/[^0-9]/g, ''), 10);
+    if (Number.isFinite(parsed) && parsed > 0) inventoryQuantity = parsed;
+  }
+
+  // Collect images (preserve order, skip duplicates)
+  const imageUrls = [];
+  const pushImage = (url, alt) => {
+    if (!url) return;
+    if (!imageUrls.find(i => i.src === url)) imageUrls.push(alt ? { src: url, alt } : { src: url });
+  };
+  pushImage(item.ImageLink, `${item.Brand || ''} ${item.Model || ''}`.trim());
+  pushImage(item.ImageLink1);
+  pushImage(item.ImageLink2);
+
+  // Build options (only include names if values exist)
+  const optionNames = [];
+  if (item.MM) optionNames.push('Size (MM)');
+  if (item.Metal) optionNames.push('Metal');
+  if (item.Bracelet) optionNames.push('Bracelet');
+
+  const optionsArray = optionNames.map(name => ({ name }));
+
+  // Build variant option values to match the options order
+  const variant = {
+    sku: item.Stock,
+    price,
+    barcode: item.Stock_No || item.Stock,
+    inventory_quantity: inventoryQuantity,
+    requires_shipping: true,
+    inventory_management: 'shopify'
+  };
+
+  if (item.MM) variant.option1 = item.MM;
+  if (item.Metal) variant.option2 = item.Metal;
+  if (item.Bracelet) variant.option3 = item.Bracelet;
+
+  // Compose tags including useful searchable fields
+  const tags = ['belgiumdia', TYPE];
+  ['Brand','Model','Reference','Condition','Case','Movement','Year'].forEach(k => {
+    const v = item[k];
+    if (v) tags.push(String(v));
+  });
+
   const body = {
     product: {
       title,
       body_html: description,
       vendor: 'Belgiumdia',
       product_type: TYPE,
-      tags: ['belgiumdia', TYPE],
+      tags: Array.from(new Set(tags)).slice(0, 250),
       status: 'active',
-      variants: [
-        {
-          sku: item.Stock,
-          price: parseFloat(item.Buy_Price) || 0,
-          barcode: item.Stock_No,
-          inventory_quantity: 1,
-          requires_shipping: false
-        }
-      ],
-      images: item.ImageLink ? [{ src: item.ImageLink }] : []
+      options: optionsArray,
+      variants: [variant],
+      images: imageUrls
     }
   };
 
   try {
-    const response = await makeRequest(options, body);
+    const response = await makeRequest(optionsReq, body);
     
     if (response.status !== 201) {
       logError(runId, `Failed to create product SKU=${item.Stock_No} status=${response.status}`, safeSnippet(response.body));
@@ -303,9 +368,9 @@ async function createProduct(item, accessToken, runId) {
 
     const productId = response.body.product.id;
     logInfo(runId, `Created product SKU=${item.Stock_No} ID=${productId}`);
-    
+
     await addProductToCollection(productId, 'Watches', accessToken, runId);
-    
+
     return response.body.product;
   } catch (e) {
     logError(runId, `Error creating product SKU=${item.Stock_No}: ${e.message}`);

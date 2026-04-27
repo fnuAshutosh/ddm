@@ -75,21 +75,35 @@ async function fetchOneProduct() {
 // Create product in Shopify
 async function createProductInShopify(item) {
   console.log('[TEST] Creating product in Shopify...');
-  
-  const title = item.Shape ? 
-    `${item.Shape.charAt(0).toUpperCase() + item.Shape.slice(1).toLowerCase()}${item.Weight ? ' - ' + item.Weight + 'ct' : ''}` : 
-    (item.Name || 'Product');
+  const title = item.Name || `${item.Brand || ''} ${item.Model || ''}`.trim() || 'Product';
 
-  const description = [
-    item.Color ? `Color: ${item.Color}` : null,
-    item.Clarity ? `Clarity: ${item.Clarity}` : null,
-    item.Cut_Grade ? `Cut: ${item.Cut_Grade}` : null,
-    item.Polish ? `Polish: ${item.Polish}` : null,
-    item.Symmetry ? `Symmetry: ${item.Symmetry}` : null,
-    item.Lab ? `Lab: ${item.Lab}` : null
-  ].filter(Boolean).join(' | ');
+  // Build description from all available fields
+  const descriptionParts = [];
+  const add = (label, value) => { if (value || value === 0) descriptionParts.push(`${label}: ${value}`); };
+  add('Brand', item.Brand);
+  add('Model', item.Model);
+  add('MM', item.MM);
+  add('Metal', item.Metal);
+  add('Bracelet', item.Bracelet);
+  add('Dial', item.Dial);
+  add('Bezel', item.Bezel);
+  add('Condition', item.Condition);
+  add('Links', item.Links);
+  add('Box', item.Box);
+  add('Paper', item.Paper);
+  add('Reference', item.Reference);
+  add('Year', item.Year);
+  add('Comment', item.Comment);
+  add('Movement', item.Movement);
+  add('Case', item.Case);
+  add('Availability', item.Availability);
+  add('DnaLink', item.DnaLink);
+  add('VideoLink', item.VideoLink);
+  add('Price', item.Price || item.Buy_Price);
 
-  const options = {
+  const description = descriptionParts.join(' | ');
+
+  const reqOptions = {
     hostname: STORE_DOMAIN,
     path: `/admin/api/${API_VERSION}/products.json`,
     method: 'POST',
@@ -99,67 +113,81 @@ async function createProductInShopify(item) {
     }
   };
 
+  const price = parseFloat(item.Price || item.Buy_Price) || 0;
+
+  let inventoryQuantity = 1;
+  if (item.Availability) {
+    const parsed = parseInt(String(item.Availability).replace(/[^0-9]/g, ''), 10);
+    if (Number.isFinite(parsed) && parsed >= 0) inventoryQuantity = parsed;
+  }
+
+  const imageUrls = [];
+  const pushImage = (url, alt) => { if (!url) return; if (!imageUrls.find(i => i.src === url)) imageUrls.push(alt ? { src: url, alt } : { src: url }); };
+  pushImage(item.ImageLink, `${item.Brand || ''} ${item.Model || ''}`.trim());
+  pushImage(item.ImageLink1);
+  pushImage(item.ImageLink2);
+
+  const optionNames = [];
+  if (item.MM) optionNames.push('Size (MM)');
+  if (item.Metal) optionNames.push('Metal');
+  if (item.Bracelet) optionNames.push('Bracelet');
+
+  const optionsArray = optionNames.map(n => ({ name: n }));
+
+  const variant = {
+    sku: item.Stock || item.Stock_No,
+    price,
+    barcode: item.Stock_No || item.Stock,
+    inventory_quantity: inventoryQuantity,
+    requires_shipping: true
+  };
+  if (item.MM) variant.option1 = item.MM;
+  if (item.Metal) variant.option2 = item.Metal;
+  if (item.Bracelet) variant.option3 = item.Bracelet;
+
+  const tags = ['belgiumdia', 'test'];
+  ['Brand','Model','Reference','Condition','Case','Movement','Year'].forEach(k => { const v = item[k]; if (v) tags.push(String(v)); });
+
   const body = {
     product: {
       title,
       body_html: description,
       vendor: 'Belgiumdia',
-      product_type: 'natural',
-      tags: ['belgiumdia', 'natural', 'test'],
+      product_type: 'test',
+      tags: Array.from(new Set(tags)).slice(0,250),
       status: 'active',
-      variants: [
-        {
-          sku: item.Stock_No,
-          price: parseFloat(item.Buy_Price) || 0,
-          barcode: item.Stock_No,
-          inventory_quantity: 1,
-          requires_shipping: false
-        }
-      ],
-      images: item.ImageLink ? [{ src: item.ImageLink }] : []
+      options: optionsArray,
+      variants: [variant],
+      images: imageUrls
     }
   };
 
   console.log('[TEST] Request body:', JSON.stringify(body, null, 2));
+  // If caller requested a dry-run, return the payload without sending to Shopify
+  if (item.__dry) {
+    return { success: true, dry: true, payload: body };
+  }
 
   try {
-    const response = await makeRequest(options, body);
-    
+    const response = await makeRequest(reqOptions, body);
     console.log('[TEST] Response status:', response.status);
     console.log('[TEST] Response body:', JSON.stringify(response.body, null, 2));
-    
-    if (response.status !== 201) {
-      return {
-        success: false,
-        status: response.status,
-        error: response.body,
-        details: 'Product creation failed - check API response above'
-      };
-    }
-
-    return {
-      success: true,
-      status: response.status,
-      product_id: response.body.product.id,
-      product_handle: response.body.product.handle,
-      details: 'Product created successfully!'
-    };
+    if (response.status !== 201) return { success: false, status: response.status, error: response.body };
+    return { success: true, status: response.status, product_id: response.body.product.id, product_handle: response.body.product.handle };
   } catch (e) {
     console.error('[TEST] Request failed:', e.message);
-    return {
-      success: false,
-      error: e.message
-    };
+    return { success: false, error: e.message };
   }
 }
 
 // Main test function
-async function testCreateProduct() {
+async function testCreateProduct(dry = false) {
   console.log('\n========== TEST: CREATE ONE PRODUCT ==========\n');
   
   try {
     // Step 1: Fetch one product
     const item = await fetchOneProduct();
+    if (dry) item.__dry = true;
     
     // Step 2: Create in Shopify
     const result = await createProductInShopify(item);
@@ -189,7 +217,44 @@ module.exports = async (req, res) => {
   }
 
   try {
-    const result = await testCreateProduct();
+    // If query ?mock=1 is provided, use an embedded sample item for testing
+    const query = req.query || {};
+    if (query.mock === '1') {
+      const SAMPLE_ITEM = {
+        Stock: '10005',
+        Brand: 'ROLEX',
+        Model: 'OYSTERDATE',
+        MM: '34',
+        Metal: 'STEEL',
+        Bracelet: 'JUBILEE',
+        Dial: 'SILVER',
+        Bezel: 'SMOOTH',
+        Condition: 'MINT',
+        Links: '-5',
+        Box: 'NO',
+        Paper: 'NO',
+        Reference: '6694',
+        Year: '',
+        Comment: 'NAKED',
+        Movement: 'AUTOMATIC',
+        Case: 'STEEL',
+        Availability: 'G',
+        Price: '4500',
+        DnaLink: 'https://dna.dnalinks.in/w/10005',
+        VideoLink: 'https://dnalinks.in/10005.mp4',
+        ImageLink: 'https://dnalinks.in/10005.jpg',
+        ImageLink1: 'https://dnalinks.in/10005_1.jpg',
+        ImageLink2: 'https://dnalinks.in/10005_2.jpg'
+      };
+
+      if (query.dry === '1') SAMPLE_ITEM.__dry = true;
+
+      const result = await createProductInShopify(SAMPLE_ITEM);
+      res.status(200).json(result);
+      return;
+    }
+
+    const result = await testCreateProduct(query.dry === '1');
     res.status(200).json(result);
   } catch (e) {
     console.error('Handler error:', e);
