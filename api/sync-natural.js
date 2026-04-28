@@ -3,9 +3,11 @@
 // Progress persisted so sync can resume across invocations
 
 const https = require('https');
+const http = require('http');
 const querystring = require('querystring');
 const fs = require('fs');
 const path = require('path');
+const { buildHtmlDescription, downloadFile, attachVideoToProduct, FIELD_MAPPINGS } = require('./product-builder');
 
 const STORE_DOMAIN = 'saatchiandco.myshopify.com';
 const PROXY_URL = 'https://ddm-theta.vercel.app/api/proxy';
@@ -255,18 +257,55 @@ async function findProductBySku(sku, accessToken, runId) {
 
 // Create Shopify product
 async function createProduct(item, accessToken, runId) {
-  const title = item.Shape ? 
-    `${item.Shape.charAt(0).toUpperCase() + item.Shape.slice(1).toLowerCase()}${item.Weight ? ' - ' + item.Weight + 'ct' : ''}` : 
+  const title = item.Shape ?
+    `${item.Shape.charAt(0).toUpperCase() + item.Shape.slice(1).toLowerCase()}${item.Weight ? ' - ' + item.Weight + 'ct' : ''}` :
     (item.Name || 'Product');
 
-  const description = [
-    item.Color ? `Color: ${item.Color}` : null,
-    item.Clarity ? `Clarity: ${item.Clarity}` : null,
-    item.Cut_Grade ? `Cut: ${item.Cut_Grade}` : null,
-    item.Polish ? `Polish: ${item.Polish}` : null,
-    item.Symmetry ? `Symmetry: ${item.Symmetry}` : null,
-    item.Lab ? `Lab: ${item.Lab}` : null
-  ].filter(Boolean).join(' | ');
+  // Build organized characteristics table
+  const description = buildHtmlDescription(item, FIELD_MAPPINGS.natural);
+
+  // Collect images (3 image links)
+  const imageUrls = [];
+  const pushImage = (url, alt) => {
+    if (!url) return;
+    if (!imageUrls.find(i => i.src === url)) imageUrls.push(alt ? { src: url, alt } : { src: url });
+  };
+  pushImage(item.ImageLink, `${item.Shape || ''} ${item.Weight || ''}ct`.trim());
+  pushImage(item.ImageLink1);
+  pushImage(item.ImageLink2);
+
+  // Build tags from available fields
+  const tags = ['belgiumdia', TYPE];
+  ['Lab', 'Color', 'Clarity', 'Shape', 'Cut_Grade'].forEach(k => {
+    const v = item[k];
+    if (v) tags.push(String(v));
+  });
+
+  const price = parseFloat(item.Buy_Price || item.Memo_Price) || 0;
+
+  const variant = {
+    sku: item.Stock_No,
+    price,
+    barcode: item.Stock_No,
+    inventory_quantity: 1,
+    requires_shipping: false,
+    inventory_management: 'shopify'
+  };
+
+  const body = {
+    product: {
+      title,
+      body_html: description,
+      vendor: 'Belgiumdia',
+      product_type: 'natural-diamond',
+      tags: Array.from(new Set(tags)).slice(0, 250),
+      status: 'active',
+      published_scope: 'global',
+      published_at: new Date().toISOString(),
+      variants: [variant],
+      images: imageUrls
+    }
+  };
 
   const options = {
     hostname: STORE_DOMAIN,
@@ -278,30 +317,9 @@ async function createProduct(item, accessToken, runId) {
     }
   };
 
-  const body = {
-    product: {
-      title,
-      body_html: description,
-      vendor: 'Belgiumdia',
-      product_type: TYPE,
-      tags: ['belgiumdia', TYPE],
-      status: 'active',
-      variants: [
-        {
-          sku: item.Stock_No,
-          price: parseFloat(item.Buy_Price) || 0,
-          barcode: item.Stock_No,
-          inventory_quantity: 1,
-          requires_shipping: false
-        }
-      ],
-      images: item.ImageLink ? [{ src: item.ImageLink }] : []
-    }
-  };
-
   try {
     const response = await makeRequest(options, body);
-    
+
     if (response.status !== 201) {
       logError(runId, `Failed to create product SKU=${item.Stock_No} status=${response.status}`, safeSnippet(response.body));
       return null;
@@ -309,14 +327,93 @@ async function createProduct(item, accessToken, runId) {
 
     const productId = response.body.product.id;
     logInfo(runId, `Created product SKU=${item.Stock_No} ID=${productId}`);
-    
+
+    // Attach certificate PDF if available
+    if (item.CertificateLink) {
+      try {
+        await attachCertificate(productId, item.CertificateLink, accessToken, runId);
+      } catch (e) {
+        logError(runId, `Could not attach certificate for SKU=${item.Stock_No}: ${e.message}`);
+      }
+    }
+
+    // Attach video if available
+    if (item.VideoLink) {
+      try {
+        await attachVideo(productId, item.VideoLink, accessToken, runId);
+      } catch (e) {
+        logError(runId, `Could not attach video for SKU=${item.Stock_No}: ${e.message}`);
+      }
+    }
+
     // Add to Natural Diamonds collection
     await addProductToCollection(productId, 'Natural Diamonds', accessToken, runId);
-    
+
     return response.body.product;
   } catch (e) {
     logError(runId, `Error creating product SKU=${item.Stock_No}: ${e.message}`);
     return null;
+  }
+}
+
+// Attach certificate PDF to product
+async function attachCertificate(productId, certificateUrl, accessToken, runId) {
+  logInfo(runId, `Attaching certificate to product ${productId}`);
+
+  try {
+    const buffer = await downloadFile(certificateUrl, 50);
+    logInfo(runId, `Certificate downloaded: ${(buffer.length / 1024 / 1024).toFixed(2)}MB`);
+
+    const query = `
+      mutation fileCreate($files: [FileCreateInput!]!) {
+        fileCreate(files: $files) {
+          files { id fileStatus }
+          userErrors { field message }
+        }
+      }
+    `;
+
+    const options = {
+      hostname: STORE_DOMAIN,
+      path: `/admin/api/2024-10/graphql.json`,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Shopify-Access-Token': accessToken
+      }
+    };
+
+    const fileData = buffer.toString('base64');
+    const mutation = {
+      query,
+      variables: {
+        files: [{
+          originalSource: `data:application/pdf;base64,${fileData}`,
+          alt: 'Certificate'
+        }]
+      }
+    };
+
+    const response = await makeRequest(options, mutation);
+    if (response.body?.data?.fileCreate?.userErrors?.length > 0) {
+      logError(runId, `Certificate upload error`, response.body.data.fileCreate.userErrors);
+      return;
+    }
+
+    logInfo(runId, `Certificate attached successfully`);
+  } catch (e) {
+    logError(runId, `Certificate attachment failed: ${e.message}`);
+  }
+}
+
+// Attach video to product
+async function attachVideo(productId, videoUrl, accessToken, runId) {
+  logInfo(runId, `Attaching video to product ${productId}`);
+  try {
+    const result = await attachVideoToProduct(productId, videoUrl, accessToken, STORE_DOMAIN);
+    logInfo(runId, `Video attached (${result.mediaContentType}, ${result.mediaCount} media items)`);
+  } catch (e) {
+    logError(runId, `Video attachment failed: ${e.message}`);
   }
 }
 

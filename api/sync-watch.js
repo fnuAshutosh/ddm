@@ -75,6 +75,10 @@ function saveProgress(progress) {
   }
 }
 
+function videoMediaContentType(url) {
+  return /youtube\.com|youtu\.be|vimeo\.com/i.test(url) ? 'EXTERNAL_VIDEO' : 'VIDEO';
+}
+
 function makeRequest(options, body = null) {
   return new Promise((resolve, reject) => {
     const req = https.request(options, (res) => {
@@ -255,35 +259,86 @@ async function findProductBySku(sku, accessToken, runId) {
 async function createProduct(item, accessToken, runId) {
   const title = item.Name || `${item.Brand || ''} ${item.Model || ''}`.trim() || 'Watch';
 
-  // Build a rich HTML description that includes all incoming fields
-  const descriptionLines = [];
-  const add = (label, value) => {
-    if (!value && value !== 0) return;
-    descriptionLines.push(`<strong>${label}:</strong> ${value}`);
-  };
+  // Build organized HTML table with characteristics
+  const rows = [];
+  const addRow = (label, value) => { if (value || value === 0) rows.push({ label, value }); };
 
-  add('Brand', item.Brand);
-  add('Model', item.Model);
-  add('MM', item.MM);
-  add('Metal', item.Metal);
-  add('Bracelet', item.Bracelet);
-  add('Dial', item.Dial);
-  add('Bezel', item.Bezel);
-  add('Condition', item.Condition);
-  add('Links', item.Links);
-  add('Box', item.Box);
-  add('Paper', item.Paper);
-  add('Reference', item.Reference);
-  add('Year', item.Year);
-  add('Comment', item.Comment);
-  add('Movement', item.Movement);
-  add('Case', item.Case);
-  add('Availability', item.Availability);
-  add('DnaLink', item.DnaLink);
-  add('VideoLink', item.VideoLink);
-  add('Price', item.Price || item.Buy_Price);
+  addRow('Brand', item.Brand);
+  addRow('Model', item.Model);
+  addRow('Size (MM)', item.MM);
+  addRow('Metal', item.Metal);
+  addRow('Bracelet', item.Bracelet);
+  addRow('Dial', item.Dial);
+  addRow('Bezel', item.Bezel);
+  addRow('Condition', item.Condition);
+  addRow('Links', item.Links);
+  addRow('Box', item.Box);
+  addRow('Paper', item.Paper);
+  addRow('Reference', item.Reference);
+  addRow('Year of Production', item.Year);
+  addRow('Comment', item.Comment);
+  addRow('Movement', item.Movement);
+  addRow('Case', item.Case);
+  addRow('Availability', item.Availability);
 
-  const description = descriptionLines.length > 0 ? `<p>${descriptionLines.join('</p><p>')}</p>` : (item.Description || '');
+  let description = `
+<style>
+  .product-characteristics {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 20px 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  .product-characteristics th {
+    background-color: #8B1A1A;
+    color: #fff;
+    padding: 12px;
+    text-align: left;
+    font-weight: 600;
+    font-size: 14px;
+    letter-spacing: 1px;
+  }
+  .product-characteristics td {
+    padding: 12px;
+    border-bottom: 1px solid #e5e5e5;
+    font-size: 14px;
+  }
+  .product-characteristics tr:hover {
+    background-color: #f9f9f9;
+  }
+  .product-characteristics td:first-child {
+    color: #666;
+    font-weight: 500;
+    width: 35%;
+  }
+</style>
+
+<h2 style="margin-top: 30px; font-size: 18px; font-weight: 600;">PRODUCT CHARACTERISTICS</h2>
+
+<table class="product-characteristics">
+  <thead>
+    <tr>
+      <th>CHARACTERISTIC</th>
+      <th>DETAILS</th>
+    </tr>
+  </thead>
+  <tbody>`;
+
+  rows.forEach(row => {
+    description += `
+    <tr>
+      <td>${row.label}</td>
+      <td>${row.value}</td>
+    </tr>`;
+  });
+
+  description += `
+  </tbody>
+</table>`;
+
+  if (item.DnaLink) {
+    description += `<p style="margin-top: 20px; color: #666;"><a href="${item.DnaLink}" target="_blank">View on DNA</a></p>`;
+  }
 
   const optionsReq = {
     hostname: STORE_DOMAIN,
@@ -305,39 +360,17 @@ async function createProduct(item, accessToken, runId) {
     if (Number.isFinite(parsed) && parsed > 0) inventoryQuantity = parsed;
   }
 
-  // Collect images and videos for media array
+  // Collect images (preserve order, skip duplicates)
   const imageUrls = [];
-  const mediaArray = [];
   const pushImage = (url, alt) => {
     if (!url) return;
-    if (!imageUrls.find(i => i.src === url)) {
-      imageUrls.push(alt ? { src: url, alt } : { src: url });
-      // Also add to media as image
-      mediaArray.push({ media_type: 'image', src: url, alt: alt || '' });
-    }
+    if (!imageUrls.find(i => i.src === url)) imageUrls.push(alt ? { src: url, alt } : { src: url });
   };
   pushImage(item.ImageLink, `${item.Brand || ''} ${item.Model || ''}`.trim());
   pushImage(item.ImageLink1);
   pushImage(item.ImageLink2);
-  
-  // Add video to media if available
-  if (item.VideoLink) {
-    mediaArray.push({ 
-      media_type: 'external_video', 
-      src: item.VideoLink,
-      alt: `${item.Brand || ''} ${item.Model || ''}`.trim()
-    });
-  }
 
-  // Build options (only include names if values exist)
-  const optionNames = [];
-  if (item.MM) optionNames.push('Size (MM)');
-  if (item.Metal) optionNames.push('Metal');
-  if (item.Bracelet) optionNames.push('Bracelet');
-
-  const optionsArray = optionNames.map(name => ({ name }));
-
-  // Build variant option values to match the options order
+  // Single variant (specs displayed in description table)
   const variant = {
     sku: item.Stock,
     price,
@@ -346,10 +379,6 @@ async function createProduct(item, accessToken, runId) {
     requires_shipping: true,
     inventory_management: 'shopify'
   };
-
-  if (item.MM) variant.option1 = item.MM;
-  if (item.Metal) variant.option2 = item.Metal;
-  if (item.Bracelet) variant.option3 = item.Bracelet;
 
   // Compose tags including useful searchable fields
   const tags = ['belgiumdia', TYPE];
@@ -363,13 +392,13 @@ async function createProduct(item, accessToken, runId) {
       title,
       body_html: description,
       vendor: 'Belgiumdia',
-      product_type: TYPE,
+      product_type: 'watch',
       tags: Array.from(new Set(tags)).slice(0, 250),
       status: 'active',
-      options: optionsArray,
+      published_scope: 'global',
+      published_at: new Date().toISOString(),
       variants: [variant],
-      images: imageUrls,
-      media: mediaArray
+      images: imageUrls
     }
   };
 
@@ -383,6 +412,45 @@ async function createProduct(item, accessToken, runId) {
 
     const productId = response.body.product.id;
     logInfo(runId, `Created product SKU=${item.Stock_No} ID=${productId}`);
+
+    // Add external video via GraphQL mutation if VideoLink exists
+    if (item.VideoLink) {
+      try {
+        const videoOptions = {
+          hostname: STORE_DOMAIN,
+          path: `/admin/api/${API_VERSION}/graphql.json`,
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Shopify-Access-Token': accessToken
+          }
+        };
+        
+        const mediaType = videoMediaContentType(item.VideoLink);
+        const videoMutation = {
+          query: `mutation {
+            productCreateMedia(productId: "gid://shopify/Product/${productId}", media: [{originalSource: "${item.VideoLink}", mediaContentType: ${mediaType}}]) {
+              media { id mediaContentType }
+              mediaUserErrors { field message }
+              userErrors { field message }
+            }
+          }`
+        };
+
+        const videoResponse = await makeRequest(videoOptions, videoMutation);
+        const mediaErrors = [
+          ...(videoResponse.body?.data?.productCreateMedia?.userErrors || []),
+          ...(videoResponse.body?.data?.productCreateMedia?.mediaUserErrors || [])
+        ];
+        if (mediaErrors.length > 0) {
+          logError(runId, `Failed to add video for SKU=${item.Stock_No}`, mediaErrors);
+        } else {
+          logInfo(runId, `Video media added (${mediaType}) for SKU=${item.Stock_No}`);
+        }
+      } catch (e) {
+        logError(runId, `Could not add video for SKU=${item.Stock_No}: ${e.message}`);
+      }
+    }
 
     await addProductToCollection(productId, 'Watches', accessToken, runId);
 
