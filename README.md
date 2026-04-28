@@ -87,25 +87,19 @@ Replace `<YOUR_VERCEL_URL>` with your deployment URL (for example, `https://ddm-
 - `GET <YOUR_VERCEL_URL>/api/proxy?action=warm`
 - `GET <YOUR_VERCEL_URL>/api/proxy?action=warm&mode=all&types=natural,lab,watch,jewelry`
 
-#### Sync endpoints
+#### Sync endpoints (create Shopify products from belgiumdia items)
 
-- `GET <YOUR_VERCEL_URL>/api/sync-belgiumdia`
-- `GET <YOUR_VERCEL_URL>/api/sync-natural`
-- `GET <YOUR_VERCEL_URL>/api/sync-lab`
-- `GET <YOUR_VERCEL_URL>/api/sync-watch`
-- `GET <YOUR_VERCEL_URL>/api/sync-jewelry`
-- `GET <YOUR_VERCEL_URL>/api/sync-watches`
-- `POST <YOUR_VERCEL_URL>/api/sync-belgiumdia-bulk` (requires `Authorization: Bearer <token>`)
+- `GET <YOUR_VERCEL_URL>/api/sync-natural?max_create=50` — Sync natural diamonds
+- `GET <YOUR_VERCEL_URL>/api/sync-lab?max_create=50` — Sync lab diamonds
+- `GET <YOUR_VERCEL_URL>/api/sync-watch?max_create=50` — Sync watches
+- `GET <YOUR_VERCEL_URL>/api/sync-jewelry?max_create=50` — Sync jewelry
 
-#### Watch view endpoint
-
-- `GET <YOUR_VERCEL_URL>/api/watches?page=1&limit=50`
-
-#### Test endpoints
-
-- `GET <YOUR_VERCEL_URL>/api/test-create-product`
-- `GET <YOUR_VERCEL_URL>/api/test-complete-product`
-- `GET <YOUR_VERCEL_URL>/api/test-hardcoded`
+Each sync endpoint:
+- Fetches items from belgiumdia proxy
+- Creates Shopify products with 3 images, videos, and characteristics table
+- Tracks inventory in Shopify
+- Publishes products to Online Store
+- Maintains progress file so syncs can resume
 
 ### `GET /api/proxy`
 
@@ -185,13 +179,21 @@ then update `renderCard()` in `belgumdia.liquid`.
 ## File structure
 
 ```
-belgumdia-proxy/
-├── api/
-│   └── proxy.js          ← Vercel serverless function (the proxy)
-├── vercel.json           ← Vercel config (30s timeout)
-├── theme/
-│   └── sections/
-│       └── belgumdia.liquid  ← Shopify theme section (copy to your theme)
-└── README.md
+belgiumdia-shopify-sync/
+├── api/                          ← Vercel serverless functions
+│   ├── proxy.js                  ← Proxy: fetch & cache belgiumdia data
+│   ├── product-builder.js        ← Shared utilities: HTML tables, video upload
+│   ├── sync-natural.js           ← Sync natural diamonds to Shopify
+│   ├── sync-lab.js               ← Sync lab diamonds to Shopify
+│   ├── sync-watch.js             ← Sync watches to Shopify
+│   └── sync-jewelry.js           ← Sync jewelry to Shopify
+├── tests/                        ← Test scripts (not deployed)
+│   ├── test-create-product.js    ← Test watch product creation
+│   ├── test-lab.js               ← Test lab diamond creation
+│   ├── test-jewelry.js           ← Test jewelry creation
+│   ├── test-natural.js           ← Test natural diamond creation
+│   └── test-watch.sh             ← Shell test for watch
+├── vercel.json                   ← Vercel config
+├── README.md
+└── product_template.csv          ← Template for bulk imports
 ```
-# belgiumdia-shopify-proxy
