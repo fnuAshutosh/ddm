@@ -149,7 +149,8 @@ const FIELD_MAPPINGS = {
     { field: 'Year', label: 'Year of Production' },
     { field: 'Comment', label: 'Comment' },
     { field: 'Movement', label: 'Movement' },
-    { field: 'Case', label: 'Case' }
+    { field: 'Case', label: 'Case' },
+    { field: 'Availability', label: 'Availability' }
   ],
 
   lab: [
