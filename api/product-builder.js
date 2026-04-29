@@ -214,9 +214,50 @@ function makeRequest(options, body = null) {
       });
     });
     req.on('error', reject);
-    if (body) req.write(JSON.stringify(body));
+    if (body) {
+      if (typeof body === 'string') req.write(body);
+      else req.write(JSON.stringify(body));
+    }
     req.end();
   });
+}
+
+// Attach certificate PDF to product
+async function attachCertificate(productId, certificateUrl, accessToken, storeDomain, apiVersion = '2024-10') {
+  try {
+    const buffer = await downloadFile(certificateUrl, 50);
+    const fileData = buffer.toString('base64');
+
+    const response = await makeRequest({
+      hostname: storeDomain,
+      path: `/admin/api/${apiVersion}/graphql.json`,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Shopify-Access-Token': accessToken
+      }
+    }, {
+      query: `mutation fileCreate($files: [FileCreateInput!]!) {
+        fileCreate(files: $files) {
+          files { id fileStatus }
+          userErrors { field message }
+        }
+      }`,
+      variables: {
+        files: [{
+          originalSource: `data:application/pdf;base64,${fileData}`,
+          alt: 'Certificate'
+        }]
+      }
+    });
+
+    const errors = response.body?.data?.fileCreate?.userErrors || [];
+    if (errors.length > 0) throw new Error(`Certificate upload: ${JSON.stringify(errors)}`);
+
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
 }
 
 async function createStagedUpload(filename, fileSize, accessToken, storeDomain, apiVersion) {
@@ -331,6 +372,7 @@ async function attachVideoToProduct(productId, videoUrl, accessToken, storeDomai
 module.exports = {
   buildHtmlDescription,
   downloadFile,
+  attachCertificate,
   attachVideoToProduct,
   FIELD_MAPPINGS,
   MAX_FILE_SIZE_MB

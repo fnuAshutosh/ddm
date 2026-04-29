@@ -30,4 +30,4 @@ PRODUCT='{
 }'
 
 echo "Testing product 3226 with all 3 images..."
-DIRECT_PRODUCT="$PRODUCT" node api/test-create-product.js
+DIRECT_PRODUCT="$PRODUCT" node tests/test-create-product.js
