@@ -3,7 +3,7 @@
 PRODUCT='{
   "Stock": "3226",
   "Stock_No": "3226",
-  "Brand": "ROLEX",
+  "Brand": "ROLEXXXXXXXXXXXXXXXXXXXXXXXXXXxX",
   "Model": "OYSTER PERPETUAL",
   "MM": "26",
   "Metal": "STEEL",

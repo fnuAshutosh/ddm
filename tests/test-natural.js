@@ -4,10 +4,10 @@ const path = require('path');
 const https = require('https');
 const http = require('http');
 const querystring = require('querystring');
-const { buildHtmlDescription, downloadFile, attachVideoToProduct, FIELD_MAPPINGS } = require('./api/product-builder');
+const { buildHtmlDescription, downloadFile, attachVideoToProduct, FIELD_MAPPINGS } = require('../api/product-builder');
 
-if (fs.existsSync(path.join(__dirname, '.env.local'))) {
-  const envPath = path.join(__dirname, '.env.local');
+if (fs.existsSync(path.join(__dirname, '..', '.env.local'))) {
+  const envPath = path.join(__dirname, '..', '.env.local');
   const envContent = fs.readFileSync(envPath, 'utf8');
   envContent.split('\n').forEach(line => {
     const trimmed = line.trim();
@@ -156,26 +156,81 @@ async function main() {
   console.log('╚════════════════════════════════════════════════════════╝\n');
 
   const product = {
-    Stock_No: "NAT-2024-001",
-    Shape: "ROUND",
-    Weight: "2.15",
-    Color: "H",
-    Clarity: "SI1",
-    Cut_Grade: "EX",
-    Polish: "VG",
-    Symmetry: "VG",
-    Fluorescence_Intensity: "N",
-    Measurements: "8.42 X 8.35 X 5.15",
-    Lab: "GIA",
-    Report_Issue_Date: "04/15/2026",
-    Cert_Comments: "Natural Diamond - Excellent Quality",
-    Buy_Price: "8950",
-    ImageLink: "https://dnalinks.in/natural/diamond1.jpg",
-    ImageLink1: "https://dnalinks.in/natural/diamond1_1.jpg",
-    ImageLink2: "https://dnalinks.in/natural/diamond1_2.jpg",
-    VideoLink: "https://www.youtube.com/watch?v=BmZxL_i8Skg",
-    CertificateLink: "https://dnalinks.in/certificates/GIA-NAT-2024-001.pdf"
-  };
+    "Stock_No": "15718",
+    "Availability": "G",
+    "Shape": "MARQUISE",
+    "Weight": "0.5",
+    "Color": "F",
+    "Clarity": "I2",
+    "Cut_Grade": "G",
+    "Polish": "VG",
+    "Symmetry": "G",
+    "Fluorescence_Intensity": "S",
+    "Fluorescence_Color": "B",
+    "Measurements": "7.89 X 3.99 X 2.61",
+    "Lab": "GIA",
+    "Treatment": "",
+    "FancyColor": "",
+    "Fancy_Color_Intensity": "",
+    "FancyColorOvertone": "",
+    "DEPTH_PER": "65.4",
+    "TABLE_PER": "56",
+    "Girdle_Min": "Thick",
+    "Girdle_Max": "Extremely Thick",
+    "Girdle_Per": "",
+    "Girdle_Condition": "",
+    "Culet_Size": "N",
+    "Culet_Condition": "",
+    "Crown_Height": "",
+    "Crown_Angle": "",
+    "Pavilion_Depth": "",
+    "Pavilion_Angle": "",
+    "Cert_Comments": "",
+    "Country": "USA",
+    "State": "NY",
+    "City": "New York",
+    "Country_Of_Origin": "BWA",
+    "Key_To_Symbols": "Twinning Wisp",
+    "Shade": "None",
+    "Star_Length": "",
+    "Report_Issue_Date": "02/08/2019",
+    "Report_Type": "Diamond Dossier",
+    "Milky": "None",
+    "Eye_Clean": "Borderline",
+    "Gemprint_ID": "",
+    "BGM": "NO",
+    "Ratio": "1.98",
+    "Diamond_Type": "Natural Diamond",
+    "Member_Comments": "GD MAKE +2% RAP For Memo Service/Free Ship To HK",
+    "Time_to_Location": "",
+    "LsMatchedPairSeparable": "",
+    "Pair_Stock": "",
+    "Allow_Raplink_Feed": "",
+    "Parcel_Stones": "",
+    "Center_Inclusion": "Medium",
+    "Black_Inclusion": "Medium",
+    "Lab_Location": "",
+    "Brand": "",
+    "Sarine_Name": "",
+    "Internal_Clarity_Desc_Code": "TTGG",
+    "Clarity_Description": "Slightly Eye Visible Black and White Thru-out",
+    "Modified_Rate": "",
+    "wire_discount_price": "",
+    "ImageLink": "https://dnalinks.in/15718/still.jpg",
+    "ImageLink1": "https://dnalinks.in/15718_1.jpg",
+    "ImageLink2": "https://dnalinks.in/15718_2.jpg",
+    "VideoLink": "https://dnalinks.in/15718/video.mp4",
+    "Video_HTML": "https://dnalinks.in/15718/15718.html",
+    "CertificateLink": "https://dnalinks.in/certificate_images/2205049759.pdf",
+    "Rap_Price": "1000",
+    "Memo_Price": "515",
+    "Memo_Discount_PER": "-48.5",
+    "Buy_Price": "495",
+    "Buy_Price_Discount_PER": "-50.5",
+    "COD_Buy_Price": "475",
+    "COD_Buy_Price_Discount_PER": "-52.5",
+    "Certificate": ""
+}
 
   try {
     const token = await getAccessToken();

@@ -253,9 +253,13 @@ async function createProduct(item, cfg, accessToken, runId) {
     }
   };
 
-  pushImage(item.ImageLink, cfg.imageAltFn(item));
-  pushImage(item.ImageLink1);
-  pushImage(item.ImageLink2);
+  if (Array.isArray(item.images)) {
+    item.images.forEach(img => pushImage(img));
+  } else {
+    pushImage(item.ImageLink, cfg.imageAltFn(item));
+    pushImage(item.ImageLink1);
+    pushImage(item.ImageLink2);
+  }
 
   const tags = ['belgiumdia', cfg.type];
   cfg.tagFields.forEach(field => {
@@ -317,9 +321,10 @@ async function createProduct(item, cfg, accessToken, runId) {
       }
     }
 
-    if (item.VideoLink) {
+    const videoUrl = item.VideoLink || item.video;
+    if (videoUrl) {
       try {
-        const result = await attachVideoToProduct(productId, item.VideoLink, accessToken, STORE_DOMAIN);
+        const result = await attachVideoToProduct(productId, videoUrl, accessToken, STORE_DOMAIN);
         logInfo(runId, `Video attached (${result.mediaContentType}) for SKU=${sku}`);
       } catch (e) {
         logError(runId, `Video attachment failed for SKU=${sku}: ${e.message}`);

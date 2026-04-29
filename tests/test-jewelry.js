@@ -4,10 +4,10 @@ const path = require('path');
 const https = require('https');
 const http = require('http');
 const querystring = require('querystring');
-const { buildHtmlDescription, downloadFile, attachVideoToProduct, FIELD_MAPPINGS } = require('./api/product-builder');
+const { buildHtmlDescription, downloadFile, attachVideoToProduct, FIELD_MAPPINGS } = require('../api/product-builder');
 
-if (fs.existsSync(path.join(__dirname, '.env.local'))) {
-  const envPath = path.join(__dirname, '.env.local');
+if (fs.existsSync(path.join(__dirname, '..', '.env.local'))) {
+  const envPath = path.join(__dirname, '..', '.env.local');
   const envContent = fs.readFileSync(envPath, 'utf8');
   envContent.split('\n').forEach(line => {
     const trimmed = line.trim();
@@ -156,24 +156,31 @@ async function main() {
   console.log('╚════════════════════════════════════════════════════════╝\n');
 
   const product = {
-    item: "JWL-2024-001",
-    remarks: "Platinum Diamond Solitaire Ring",
-    jew_type: "Ring",
-    section: "Engagement",
-    metal_type: "Platinum",
-    metal_weight: "3.5",
-    diamond_weight: "1.5",
-    diamond_pcs: "1",
-    size_inch: "7",
-    price: "2500",
-    Buy_Price: "2500",
-    style: "Solitaire",
-    Condition: "New",
-    ImageLink: "https://dnalinks.in/jewelry/ring1.jpg",
-    ImageLink1: "https://dnalinks.in/jewelry/ring1_1.jpg",
-    ImageLink2: "https://dnalinks.in/jewelry/ring1_2.jpg",
-    VideoLink: "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
-  };
+    "master_item": "7002572",
+    "item": "7002572",
+    "subitem": "NK240012-RI-17I",
+    "section": "NECKLACE",
+    "jew_type": "RIVIERA",
+    "inhand_qty": null,
+    "remarks": "14K White Round Diamond Riviera Necklace",
+    "metal_type": "14W",
+    "metal_weight": "12.67",
+    "diamond_weight": "8.41",
+    "diamond_pcs": "181",
+    "size_inch": "17",
+    "size_mm": "8.00",
+    "avg_weight": "0.04",
+    "type_of_diamond": "LAB GROWN",
+    "side_stones_quality": "EF VS",
+    "price": "6197",
+    "images": [
+        "https://dnalinks.in/7002572/1W.jpg",
+        "https://dnalinks.in/7002572/2W.jpg",
+        "https://dnalinks.in/7002572/3W.jpg",
+        "https://dnalinks.in/7002572/4W.jpg"
+    ],
+    "video": "https://dnalinks.in/7002572/VW.mp4"
+}
 
   try {
     const token = await getAccessToken();
@@ -181,15 +188,20 @@ async function main() {
     const title = product.remarks || product.jew_type || 'Jewelry';
     const description = buildHtmlDescription(product, FIELD_MAPPINGS.jewelry);
 
-    // Collect images
+    // Collect images (handle both array and individual field formats)
     const imageUrls = [];
     const pushImage = (url) => {
       if (!url) return;
       if (!imageUrls.find(i => i.src === url)) imageUrls.push({ src: url });
     };
-    pushImage(product.ImageLink);
-    pushImage(product.ImageLink1);
-    pushImage(product.ImageLink2);
+
+    if (Array.isArray(product.images)) {
+      product.images.forEach(img => pushImage(img));
+    } else {
+      pushImage(product.ImageLink);
+      pushImage(product.ImageLink1);
+      pushImage(product.ImageLink2);
+    }
 
     const tags = ['belgiumdia', 'jewelry', product.jew_type, product.metal_type, product.style];
 
@@ -234,9 +246,10 @@ async function main() {
     console.log(`[TEST] Product created: ${productId}`);
     console.log(`[TEST] Images: ${imageUrls.length}`);
 
-    // Attach video if available
-    if (product.VideoLink) {
-      await attachVideo(productId, product.VideoLink, token);
+    // Attach video if available (handle both VideoLink and video field names)
+    const videoUrl = product.VideoLink || product.video;
+    if (videoUrl) {
+      await attachVideo(productId, videoUrl, token);
     }
 
     // Attach certificate if available
