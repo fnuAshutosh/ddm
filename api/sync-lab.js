@@ -1,4 +1,4 @@
-// Lab Diamond Sync - Uses exact same logic as working test-lab.js
+// Lab Diamond Sync - Uses exact same logic as working test-lab.js v2
 const https = require('https');
 const fs = require('fs');
 const querystring = require('querystring');
