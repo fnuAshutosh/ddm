@@ -4,9 +4,6 @@
     "api/proxy.js": {
       "maxDuration": 300
     },
-    "api/sync-belgiumdia.js": {
-      "maxDuration": 300
-    },
     "api/sync-natural.js": {
       "maxDuration": 300
     },
@@ -21,10 +18,6 @@
     }
   },
   "crons": [
-    {
-      "path": "/api/sync-belgiumdia.js",
-      "schedule": "0 14 * * *"
-    },
     {
       "path": "/api/sync-natural.js",
       "schedule": "0 14 * * *"
